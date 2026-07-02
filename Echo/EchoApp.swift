@@ -5,11 +5,14 @@ struct EchoApp: App {
     @StateObject private var controller: DictationController
     @StateObject private var settings = SettingsStore.shared
     @StateObject private var transcripts: TranscriptStore
+    @StateObject private var usage: UsageStore
 
     init() {
-        let store = TranscriptStore()
-        _transcripts = StateObject(wrappedValue: store)
-        _controller = StateObject(wrappedValue: DictationController(transcripts: store))
+        let transcriptStore = TranscriptStore()
+        let usageStore = UsageStore()
+        _transcripts = StateObject(wrappedValue: transcriptStore)
+        _usage = StateObject(wrappedValue: usageStore)
+        _controller = StateObject(wrappedValue: DictationController(transcripts: transcriptStore, usage: usageStore))
     }
 
     var body: some Scene {
@@ -18,6 +21,7 @@ struct EchoApp: App {
                 .environmentObject(controller)
                 .environmentObject(settings)
                 .environmentObject(transcripts)
+                .environmentObject(usage)
         }
         .defaultSize(width: 760, height: 620)
 

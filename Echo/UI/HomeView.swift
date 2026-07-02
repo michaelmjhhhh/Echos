@@ -73,6 +73,7 @@ struct HomeView: View {
         case .idle: return "Ready when you are"
         case .recording: return controller.micReady ? "Listening…" : "Starting mic…"
         case .transcribing: return "Transcribing…"
+        case .copyReady: return "No text field — copy from the pill below"
         case .error(let message): return message
         }
     }

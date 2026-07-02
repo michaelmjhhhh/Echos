@@ -88,7 +88,35 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertNil(inserter.insertedText)
     }
 
-    func testBlockedPasteSurfacesClipboardFallback() async {
+    func testNoInsertionTargetOffersCopyInsteadOfPasting() async {
+        let controller = makeController()
+        controller.activateForTesting()
+        recorder.samplesToReturn = [Float](repeating: 0, count: 16_000)
+        transcriber.result = .success("hello world")
+        inserter.hasInsertionTarget = false
+        controller.hotkeyPressed()
+        controller.hotkeyReleased()
+        await controller.transcriptionTask?.value
+        XCTAssertEqual(controller.state, .copyReady("hello world"))
+        XCTAssertNil(inserter.insertedText)
+    }
+
+    func testCopyTranscriptCopiesText() async {
+        let controller = makeController()
+        controller.activateForTesting()
+        recorder.samplesToReturn = [Float](repeating: 0, count: 16_000)
+        transcriber.result = .success("hello world")
+        inserter.hasInsertionTarget = false
+        controller.hotkeyPressed()
+        controller.hotkeyReleased()
+        await controller.transcriptionTask?.value
+
+        controller.copyTranscript()
+        XCTAssertEqual(inserter.copiedText, "hello world")
+        XCTAssertTrue(controller.copyConfirmed)
+    }
+
+    func testSecureInputBackstopOffersCopy() async {
         let controller = makeController()
         controller.activateForTesting()
         recorder.samplesToReturn = [Float](repeating: 0, count: 16_000)
@@ -97,10 +125,53 @@ final class DictationControllerTests: XCTestCase {
         controller.hotkeyPressed()
         controller.hotkeyReleased()
         await controller.transcriptionTask?.value
-        guard case .error(let message) = controller.state else {
-            return XCTFail("Expected error state, got \(controller.state)")
-        }
-        XCTAssertTrue(message.contains("clipboard"))
+        XCTAssertEqual(controller.state, .copyReady("hello"))
+    }
+
+    func testNewDictationSupersedesCopyOffer() async {
+        let controller = makeController()
+        controller.activateForTesting()
+        recorder.samplesToReturn = [Float](repeating: 0, count: 16_000)
+        transcriber.result = .success("first")
+        inserter.hasInsertionTarget = false
+        controller.hotkeyPressed()
+        controller.hotkeyReleased()
+        await controller.transcriptionTask?.value
+        XCTAssertEqual(controller.state, .copyReady("first"))
+
+        controller.hotkeyPressed()
+        XCTAssertEqual(controller.state, .recording)
+    }
+
+    func testUsageRecordedOnSuccessfulDictation() async {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("EchoUsage-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let usage = UsageStore(directory: directory)
+
+        recorder = MockRecorder()
+        transcriber = MockTranscriber()
+        inserter = MockInserter()
+        let defaults = UserDefaults(suiteName: "EchoTests-\(UUID().uuidString)")!
+        let controller = DictationController(
+            settings: SettingsStore(defaults: defaults),
+            recorder: recorder,
+            transcriber: transcriber,
+            inserter: inserter,
+            hotkeyMonitor: MockHotkeyMonitor(),
+            usage: usage,
+            autostart: false
+        )
+        controller.activateForTesting()
+        recorder.samplesToReturn = [Float](repeating: 0, count: 32_000) // 2 s
+        transcriber.result = .success("one two three")
+        controller.hotkeyPressed()
+        controller.hotkeyReleased()
+        await controller.transcriptionTask?.value
+
+        let totals = usage.totals()
+        XCTAssertEqual(totals.dictations, 1)
+        XCTAssertEqual(totals.words, 3)
     }
 
     func testQuickTapWithNoAudioIsSilentlyIgnored() {
@@ -155,12 +226,18 @@ private final class MockTranscriber: Transcribing {
 
 private final class MockInserter: TextInserting {
     var insertedText: String?
+    var copiedText: String?
+    var hasInsertionTarget = true
     var resultToReturn: InsertionResult = .pasted
 
     @discardableResult
     func insert(_ text: String) -> InsertionResult {
         insertedText = text
         return resultToReturn
+    }
+
+    func copyToClipboard(_ text: String) {
+        copiedText = text
     }
 }
 

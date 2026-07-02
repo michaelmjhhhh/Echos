@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import Carbon.HIToolbox
 
 enum InsertionResult: Equatable {
@@ -9,8 +10,11 @@ enum InsertionResult: Equatable {
 }
 
 protocol TextInserting {
+    /// Whether the frontmost app currently has somewhere to paste into.
+    var hasInsertionTarget: Bool { get }
     @discardableResult
     func insert(_ text: String) -> InsertionResult
+    func copyToClipboard(_ text: String)
 }
 
 /// Inserts text at the cursor of the frontmost app via the clipboard:
@@ -22,6 +26,62 @@ final class TextInserter: TextInserting {
     /// How long to wait before restoring the clipboard — long enough for the
     /// frontmost app to service the paste event.
     private let restoreDelay: TimeInterval = 0.7
+
+    /// Roles that clearly accept typed text.
+    private static let editableRoles: Set<String> = [
+        "AXTextField", "AXTextArea", "AXComboBox", "AXSearchField"
+    ]
+    /// Roles that clearly don't. Anything ambiguous (e.g. AXWebArea in
+    /// Electron/browser apps, which may be contenteditable) is treated as
+    /// insertable — a wrong paste is recoverable, a wrongly withheld one
+    /// breaks the core flow.
+    private static let nonEditableRoles: Set<String> = [
+        "AXButton", "AXCheckBox", "AXRadioButton", "AXPopUpButton", "AXLink",
+        "AXStaticText", "AXImage", "AXList", "AXTable", "AXOutline",
+        "AXScrollArea", "AXSplitGroup", "AXTabGroup", "AXToolbar",
+        "AXMenu", "AXMenuItem", "AXWindow", "AXSlider", "AXDisclosureTriangle"
+    ]
+
+    var hasInsertionTarget: Bool {
+        // Secure input (password fields) blocks synthetic ⌘V outright.
+        guard !IsSecureEventInputEnabled() else { return false }
+
+        let systemWide = AXUIElementCreateSystemWide()
+        var focusedRef: CFTypeRef?
+        let error = AXUIElementCopyAttributeValue(
+            systemWide,
+            kAXFocusedUIElementAttribute as CFString,
+            &focusedRef
+        )
+        guard error == .success, let focusedRef,
+              CFGetTypeID(focusedRef) == AXUIElementGetTypeID() else {
+            // Nothing has keyboard focus at all — no cursor to paste at.
+            return false
+        }
+        let element = focusedRef as! AXUIElement
+
+        var roleRef: CFTypeRef?
+        AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleRef)
+        let role = roleRef as? String
+
+        if let role, Self.editableRoles.contains(role) { return true }
+
+        var settable = DarwinBoolean(false)
+        if AXUIElementIsAttributeSettable(element, kAXValueAttribute as CFString, &settable) == .success,
+           settable.boolValue {
+            return true
+        }
+
+        if let role, Self.nonEditableRoles.contains(role) { return false }
+        // Unknown role — err on the side of pasting.
+        return true
+    }
+
+    func copyToClipboard(_ text: String) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+    }
 
     @discardableResult
     func insert(_ text: String) -> InsertionResult {

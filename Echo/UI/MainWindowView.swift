@@ -2,6 +2,7 @@ import SwiftUI
 
 enum MainSection: String, CaseIterable, Identifiable {
     case home
+    case insights
     case history
     case settings
 
@@ -10,6 +11,7 @@ enum MainSection: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .home: return "Home"
+        case .insights: return "Insights"
         case .history: return "History"
         case .settings: return "Settings"
         }
@@ -18,6 +20,7 @@ enum MainSection: String, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .home: return "waveform"
+        case .insights: return "chart.bar.xaxis"
         case .history: return "clock.arrow.circlepath"
         case .settings: return "gearshape"
         }
@@ -44,6 +47,7 @@ struct MainWindowView: View {
             Group {
                 switch section {
                 case .home: HomeView(section: $section)
+                case .insights: InsightsView()
                 case .history: HistoryView()
                 case .settings: SettingsView()
                 }
@@ -137,6 +141,7 @@ struct MainWindowView: View {
         case .idle: return "Ready"
         case .recording: return "Listening"
         case .transcribing: return "Transcribing"
+        case .copyReady: return "Ready to copy"
         case .error: return "Attention needed"
         }
     }

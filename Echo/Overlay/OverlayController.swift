@@ -12,13 +12,28 @@ final class OverlayController {
     private lazy var panel: NSPanel = makePanel()
     private var isVisible = false
 
-    func update(state: DictationState, level: Float, micReady: Bool) {
+    /// Invoked when the user clicks Copy on the pill.
+    var onCopy: (() -> Void)? {
+        get { model.onCopy }
+        set { model.onCopy = newValue }
+    }
+
+    func update(state: DictationState, level: Float, micReady: Bool, copyConfirmed: Bool) {
         model.level = level
         model.micReady = micReady
+        model.copyConfirmed = copyConfirmed
         guard state != model.state else { return }
         model.state = state
+
+        // The pill is click-through except when it's offering the Copy button.
+        if case .copyReady = state {
+            panel.ignoresMouseEvents = false
+        } else {
+            panel.ignoresMouseEvents = true
+        }
+
         switch state {
-        case .recording, .transcribing, .error:
+        case .recording, .transcribing, .copyReady, .error:
             show()
         default:
             hide()

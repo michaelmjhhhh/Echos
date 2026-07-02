@@ -10,6 +10,8 @@ final class DictationController: ObservableObject {
     /// False until real audio arrives for the current recording — Bluetooth mics
     /// take seconds to wake, and the overlay shows "Starting mic…" until then.
     @Published private(set) var micReady = false
+    /// Briefly true after the user clicks Copy on the pill.
+    @Published private(set) var copyConfirmed = false
 
     private let settings: SettingsStore
     private let recorder: AudioRecording
@@ -17,6 +19,7 @@ final class DictationController: ObservableObject {
     private let inserter: TextInserting
     private let processors: [TextProcessor]
     private let transcripts: TranscriptStore?
+    private let usage: UsageStore?
     private var hotkeyMonitor: HotkeyMonitoring
     private var overlay: OverlayController?
     private var maxDurationTask: Task<Void, Never>?
@@ -41,9 +44,11 @@ final class DictationController: ObservableObject {
         processors: [TextProcessor] = [WhitespaceCleanupProcessor()],
         hotkeyMonitor: HotkeyMonitoring? = nil,
         transcripts: TranscriptStore? = nil,
+        usage: UsageStore? = nil,
         autostart: Bool = true
     ) {
         self.transcripts = transcripts
+        self.usage = usage
         self.settings = settings
         self.recorder = recorder
         self.transcriber = transcriber ?? TranscriptionService(modelVariant: settings.modelVariant)
@@ -74,9 +79,10 @@ final class DictationController: ObservableObject {
         if autostart && !isHostingTests {
             let overlay = OverlayController()
             self.overlay = overlay
-            Publishers.CombineLatest3($state, $audioLevel, $micReady)
-                .sink { state, level, micReady in
-                    overlay.update(state: state, level: level, micReady: micReady)
+            overlay.onCopy = { [weak self] in self?.copyTranscript() }
+            Publishers.CombineLatest4($state, $audioLevel, $micReady, $copyConfirmed)
+                .sink { state, level, micReady, copyConfirmed in
+                    overlay.update(state: state, level: level, micReady: micReady, copyConfirmed: copyConfirmed)
                 }
                 .store(in: &cancellables)
             Task { await start() }
@@ -128,8 +134,13 @@ final class DictationController: ObservableObject {
     // MARK: - Recording lifecycle
 
     func hotkeyPressed() {
-        guard case .idle = state else { return }
+        switch state {
+        case .idle: break
+        case .copyReady: state = .idle // a new dictation supersedes the offer
+        default: return
+        }
         micReady = false
+        copyConfirmed = false
         do {
             try recorder.start(deviceUID: settings.inputDeviceUID)
         } catch {
@@ -187,6 +198,8 @@ final class DictationController: ObservableObject {
         }
 
         state = .transcribing
+        let duration = Double(samples.count) / AudioRecorder.sampleRate
+        let releasedAt = Date()
         transcriptionTask = Task { [weak self] in
             guard let self else { return }
             do {
@@ -202,17 +215,60 @@ final class DictationController: ObservableObject {
                 if self.settings.saveHistory {
                     self.transcripts?.add(text)
                 }
-                let result = self.inserter.insert(text)
-                if result == .copiedToClipboard {
-                    self.state = .error("Paste blocked — transcript is on your clipboard")
-                    self.scheduleReturnToIdle()
+
+                let frontApp = NSWorkspace.shared.frontmostApplication
+                let recordUsage = {
+                    self.usage?.record(
+                        words: text.split(whereSeparator: \.isWhitespace).count,
+                        duration: duration,
+                        latency: Date().timeIntervalSince(releasedAt),
+                        appBundleID: frontApp?.bundleIdentifier,
+                        appName: frontApp?.localizedName
+                    )
+                }
+
+                if self.inserter.hasInsertionTarget {
+                    let result = self.inserter.insert(text)
+                    recordUsage()
+                    if result == .copiedToClipboard {
+                        // Secure input appeared between the check and the paste.
+                        self.offerCopy(of: text)
+                    } else {
+                        self.state = .idle
+                    }
                 } else {
-                    self.state = .idle
+                    recordUsage()
+                    self.offerCopy(of: text)
                 }
             } catch {
                 self.state = .error("Transcription failed: \(error.localizedDescription)")
                 self.scheduleReturnToIdle()
             }
+        }
+    }
+
+    // MARK: - Copy fallback
+
+    private func offerCopy(of text: String) {
+        copyConfirmed = false
+        state = .copyReady(text)
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(10))
+            guard let self, case .copyReady(text) = self.state else { return }
+            self.state = .idle
+        }
+    }
+
+    /// Called when the user clicks Copy on the floating pill.
+    func copyTranscript() {
+        guard case .copyReady(let text) = state else { return }
+        inserter.copyToClipboard(text)
+        copyConfirmed = true
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1.2))
+            guard let self, case .copyReady = self.state else { return }
+            self.state = .idle
+            self.copyConfirmed = false
         }
     }
 

@@ -8,6 +8,9 @@ enum DictationState: Equatable {
     case idle
     case recording
     case transcribing
+    /// Transcription finished but there was no text cursor to paste into —
+    /// the floating pill offers a Copy button instead.
+    case copyReady(String)
     case error(String)
 
     var menuBarSymbol: String {
@@ -19,6 +22,7 @@ enum DictationState: Equatable {
         case .idle: return "mic"
         case .recording: return "waveform"
         case .transcribing: return "ellipsis.circle"
+        case .copyReady: return "doc.on.clipboard"
         case .error: return "exclamationmark.triangle"
         }
     }
@@ -38,6 +42,7 @@ enum DictationState: Equatable {
         case .idle: return "Ready — hold \(SettingsStore.shared.hotkey.label) to dictate"
         case .recording: return "Listening…"
         case .transcribing: return "Transcribing…"
+        case .copyReady: return "No text field found — click the pill to copy"
         case .error(let message): return "Error: \(message)"
         }
     }

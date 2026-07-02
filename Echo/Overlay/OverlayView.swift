@@ -5,6 +5,8 @@ final class OverlayModel: ObservableObject {
     @Published var state: DictationState = .idle
     @Published var level: Float = 0
     @Published var micReady = false
+    @Published var copyConfirmed = false
+    var onCopy: (() -> Void)?
 }
 
 /// The floating pill shown near the bottom of the screen while dictating —
@@ -35,6 +37,29 @@ struct OverlayView: View {
                     .controlSize(.small)
                     .colorScheme(.dark)
                 Text("Transcribing…")
+            case .copyReady(let transcript):
+                if model.copyConfirmed {
+                    Image(systemName: "checkmark")
+                        .foregroundStyle(OverlayView.cyan)
+                    Text("Copied")
+                } else {
+                    Text(transcript)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: 170, alignment: .leading)
+                        .foregroundStyle(.white.opacity(0.85))
+                    Button {
+                        model.onCopy?()
+                    } label: {
+                        Text("Copy")
+                            .font(.echo(12, .semibold))
+                            .foregroundStyle(Color(nsColor: NSColor(hex: 0x1C1C1E)))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 4)
+                            .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(OverlayView.cyan))
+                    }
+                    .buttonStyle(.plain)
+                }
             case .error(let message):
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(.yellow)
