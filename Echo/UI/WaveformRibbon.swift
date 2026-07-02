@@ -1,37 +1,65 @@
 import SwiftUI
 
-/// Echo's signature: a wide waveform that breathes gently at idle and mirrors
-/// the live microphone level while recording. The floating pill carries the
-/// small version; this is the grown-up one for the Home hero.
+/// Echo's signature: a waveform with a bell-shaped envelope (tallest at the
+/// center, like the app icon) that breathes gently at idle and dances with the
+/// live microphone level while recording. The only element in the app allowed
+/// to glow.
 struct WaveformRibbon: View {
     var level: Float
     var isLive: Bool
 
-    private static let barCount = 44
+    private static let barCount = 28
+    /// Bell envelope: how tall each bar is allowed to be, 0...1 by position.
+    private static let envelope: [CGFloat] = (0..<barCount).map { index in
+        let x = (CGFloat(index) - CGFloat(barCount - 1) / 2) / (CGFloat(barCount) / 2)
+        return 0.18 + 0.82 * exp(-2.2 * x * x)
+    }
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var history: [Float] = Array(repeating: 0, count: WaveformRibbon.barCount)
 
+    private static let liveGradient = LinearGradient(
+        colors: [.echoCoralLight, .echoCoralDeep],
+        startPoint: .top,
+        endPoint: .bottom
+    )
+
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1 / 24)) { timeline in
+        TimelineView(.animation(minimumInterval: 1 / 24, paused: reduceMotion && !isLive)) { timeline in
             let time = timeline.date.timeIntervalSinceReferenceDate
-            HStack(alignment: .center, spacing: 4) {
+            HStack(alignment: .center, spacing: 5) {
                 ForEach(0..<Self.barCount, id: \.self) { index in
-                    let idle = 0.05 + 0.045 * sin(time * 1.4 + Double(index) * 0.42)
-                    let value = isLive
-                        ? max(CGFloat(history[index]), CGFloat(idle) * 0.4)
-                        : CGFloat(idle)
-                    Capsule()
-                        .fill(isLive ? Color.echoCoral : Color.echoSecondary.opacity(0.4))
-                        .frame(width: 3.5, height: 6 + value * 58)
+                    bar(at: index, time: time)
                 }
             }
             .frame(maxWidth: .infinity)
         }
-        .frame(height: 72)
+        .frame(height: 88)
         .onChange(of: level) { _, newLevel in
             history.removeFirst()
             history.append(min(1, max(0, newLevel)))
         }
-        .animation(.linear(duration: 0.1), value: history)
+        .animation(reduceMotion ? nil : .linear(duration: 0.1), value: history)
+    }
+
+    @ViewBuilder
+    private func bar(at index: Int, time: TimeInterval) -> some View {
+        let envelope = Self.envelope[index]
+        let breathing = reduceMotion ? 0.55 : 0.4 + 0.25 * sin(time * 1.3 + Double(index) * 0.5)
+        let fraction = isLive
+            ? max(CGFloat(history[index]), CGFloat(breathing) * 0.25)
+            : CGFloat(breathing)
+        let height = 6 + envelope * fraction * 72
+
+        if isLive {
+            Capsule()
+                .fill(Self.liveGradient)
+                .frame(width: 4, height: height)
+                .shadow(color: Color.echoCoral.opacity(0.35), radius: 12)
+        } else {
+            Capsule()
+                .fill(Color.echoSecondary.opacity(0.35))
+                .frame(width: 4, height: height)
+        }
     }
 }

@@ -19,7 +19,7 @@ struct EchoApp: App {
                 .environmentObject(settings)
                 .environmentObject(transcripts)
         }
-        .defaultSize(width: 860, height: 580)
+        .defaultSize(width: 760, height: 620)
 
         MenuBarExtra {
             MenuContentView()

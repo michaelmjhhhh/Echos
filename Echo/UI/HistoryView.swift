@@ -22,13 +22,15 @@ struct HistoryView: View {
                 ScrollView {
                     LazyVStack(spacing: 8) {
                         ForEach(filtered) { entry in
-                            HistoryRow(entry: entry)
+                            TranscriptRow(entry: entry)
                         }
                     }
                     .padding(.bottom, 16)
                 }
             }
         }
+        .frame(maxWidth: 640)
+        .frame(maxWidth: .infinity)
         .padding(24)
     }
 
@@ -95,52 +97,3 @@ struct HistoryView: View {
     }
 }
 
-private struct HistoryRow: View {
-    let entry: TranscriptEntry
-    @State private var isHovering = false
-    @State private var justCopied = false
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(entry.text)
-                    .font(.echo(13))
-                    .foregroundStyle(Color.echoText)
-                    .lineLimit(3)
-                    .multilineTextAlignment(.leading)
-                    .textSelection(.enabled)
-                HStack(spacing: 8) {
-                    Text(entry.date.formatted(.relative(presentation: .named)))
-                    Text("·")
-                    Text("\(entry.wordCount) words")
-                }
-                .font(.echoMono(11))
-                .foregroundStyle(Color.echoSecondary)
-            }
-            Spacer()
-            if isHovering || justCopied {
-                Button {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(entry.text, forType: .string)
-                    justCopied = true
-                    Task {
-                        try? await Task.sleep(for: .seconds(1.5))
-                        justCopied = false
-                    }
-                } label: {
-                    Label(justCopied ? "Copied" : "Copy", systemImage: justCopied ? "checkmark" : "doc.on.doc")
-                        .font(.echo(11, .medium))
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(justCopied ? Color.green : Color.echoSecondary)
-            }
-        }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(isHovering ? Color.echoCardHover : Color.echoCard)
-        )
-        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Color.echoHairline))
-        .onHover { isHovering = $0 }
-    }
-}

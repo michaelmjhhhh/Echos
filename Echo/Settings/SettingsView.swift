@@ -72,6 +72,8 @@ struct SettingsView: View {
                     footnote("English-optimized Whisper, runs fully on-device. To try another variant: defaults write com.michael.echo modelVariant <name>, then relaunch Echo.")
                 }
             }
+            .frame(maxWidth: 640)
+            .frame(maxWidth: .infinity)
             .padding(24)
         }
         .onAppear { inputDevices = AudioInputDevices.all() }
@@ -94,6 +96,7 @@ struct SettingsView: View {
             Spacer()
             control()
         }
+        .frame(minHeight: 28)
     }
 
     private var hairline: some View {
@@ -103,7 +106,7 @@ struct SettingsView: View {
     private func footnote(_ text: String) -> some View {
         Text(text)
             .font(.echo(11))
-            .foregroundStyle(Color.echoSecondary)
+            .foregroundStyle(Color.echoSecondary.opacity(0.8))
             .fixedSize(horizontal: false, vertical: true)
     }
 }

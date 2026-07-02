@@ -28,6 +28,7 @@ struct MainWindowView: View {
     @EnvironmentObject private var controller: DictationController
     @EnvironmentObject private var settings: SettingsStore
     @EnvironmentObject private var transcripts: TranscriptStore
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var section: MainSection = .home
 
     var body: some View {
@@ -42,15 +43,17 @@ struct MainWindowView: View {
 
             Group {
                 switch section {
-                case .home: HomeView()
+                case .home: HomeView(section: $section)
                 case .history: HistoryView()
                 case .settings: SettingsView()
                 }
             }
+            .id(section)
+            .transition(.opacity.combined(with: .offset(y: 6)))
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .background(Color.echoBase)
-        .frame(minWidth: 820, minHeight: 560)
+        .frame(minWidth: 720, minHeight: 560)
     }
 
     private var sidebar: some View {
@@ -65,12 +68,12 @@ struct MainWindowView: View {
                     .foregroundStyle(Color.echoText)
             }
             .padding(.horizontal, 12)
-            .padding(.top, 18)
-            .padding(.bottom, 14)
+            .padding(.top, 20)
+            .padding(.bottom, 16)
 
             ForEach(MainSection.allCases) { item in
                 SidebarRow(section: item, isSelected: section == item) {
-                    section = item
+                    withAnimation(reduceMotion ? nil : Motion.spring) { section = item }
                 }
             }
 
@@ -106,8 +109,26 @@ struct MainWindowView: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.echoCard.opacity(0.6)))
-        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Color.echoHairline))
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [Color.echoCardTop.opacity(0.7), Color.echoCard.opacity(0.6)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(
+                    LinearGradient(
+                        colors: [.echoEdgeTop, .echoEdgeBottom],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+        )
     }
 
     private var statusColor: Color {
@@ -148,23 +169,31 @@ private struct SidebarRow: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 9) {
+                Capsule()
+                    .fill(Color.echoCoral)
+                    .frame(width: 3, height: 16)
+                    .opacity(isSelected ? 1 : 0)
                 Image(systemName: section.symbol)
                     .font(.system(size: 13, weight: .medium))
                     .frame(width: 18)
-                    .foregroundStyle(isSelected ? Color.echoText : Color.echoSecondary)
+                    .foregroundStyle(isSelected ? Color.echoCoral : Color.echoSecondary)
                 Text(section.title)
                     .font(.echo(13, isSelected ? .semibold : .regular))
                     .foregroundStyle(isSelected ? Color.echoText : Color.echoSecondary)
                 Spacer()
             }
-            .padding(.horizontal, 10)
+            .padding(.leading, 7)
+            .padding(.trailing, 10)
             .padding(.vertical, 7)
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(isSelected ? Color.echoCardHover : (isHovering ? Color.echoCard.opacity(0.6) : .clear))
             )
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
         .buttonStyle(.plain)
-        .onHover { isHovering = $0 }
+        .onHover { hovering in
+            withAnimation(Motion.ease) { isHovering = hovering }
+        }
     }
 }

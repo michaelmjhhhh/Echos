@@ -1,45 +1,47 @@
 import SwiftUI
 
 struct HomeView: View {
+    @Binding var section: MainSection
+
     @EnvironmentObject private var controller: DictationController
     @EnvironmentObject private var settings: SettingsStore
     @EnvironmentObject private var transcripts: TranscriptStore
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            if case .needsPermissions(let mic, let ax) = controller.state {
-                PermissionsBanner(microphone: mic, accessibility: ax)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                if case .needsPermissions(let mic, let ax) = controller.state {
+                    PermissionsBanner(microphone: mic, accessibility: ax)
+                }
+
+                hero
+
+                HStack(spacing: 16) {
+                    infoCard(eyebrow: "Microphone", value: microphoneName)
+                    infoCard(eyebrow: "Model", value: modelDisplayName)
+                    todayCard
+                }
+
+                recentSection
             }
-
-            hero
-
-            HStack(spacing: 16) {
-                infoCard(
-                    eyebrow: "Microphone",
-                    value: microphoneName,
-                    symbol: "mic"
-                )
-                infoCard(
-                    eyebrow: "Model",
-                    value: modelDisplayName,
-                    symbol: "cpu"
-                )
-                todayCard
-            }
-
-            Spacer()
+            .frame(maxWidth: 640)
+            .frame(maxWidth: .infinity)
+            .padding(24)
         }
-        .padding(24)
     }
 
+    // MARK: - Hero
+
     private var hero: some View {
-        VStack(spacing: 18) {
+        VStack(spacing: 16) {
             WaveformRibbon(level: controller.audioLevel, isLive: isLive)
 
             Text(heroStatus)
-                .font(.echoDisplay(19))
-                .tracking(-0.3)
+                .font(.echoDisplay(24))
+                .tracking(-0.4)
                 .foregroundStyle(Color.echoText)
+                .contentTransition(.opacity)
 
             HStack(spacing: 6) {
                 Text("Hold")
@@ -49,10 +51,12 @@ struct HomeView: View {
                     .foregroundStyle(Color.echoSecondary)
             }
             .font(.echo(12))
+            .padding(.top, 8)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 30)
+        .padding(.vertical, 32)
         .echoCard(padding: 24)
+        .animation(reduceMotion ? nil : Motion.spring, value: controller.state)
     }
 
     private var isLive: Bool {
@@ -73,26 +77,22 @@ struct HomeView: View {
         }
     }
 
+    // MARK: - Info cards
+
     private var microphoneName: String {
         guard let uid = settings.inputDeviceUID else { return "System Default" }
         return AudioInputDevices.all().first { $0.uid == uid }?.name ?? "System Default"
     }
 
     private var modelDisplayName: String {
-        // "distil-whisper_distil-large-v3_594MB" → "Distil Large v3"
         settings.modelVariant.contains("distil") ? "Whisper Distil Large v3" : settings.modelVariant
     }
 
-    private func infoCard(eyebrow: String, value: String, symbol: String) -> some View {
+    private func infoCard(eyebrow: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Image(systemName: symbol)
-                    .font(.system(size: 10))
-                    .foregroundStyle(Color.echoSecondary)
-                EyebrowText(text: eyebrow)
-            }
+            EyebrowText(text: eyebrow)
             Text(value)
-                .font(.echo(13, .medium))
+                .font(.echo(15, .medium))
                 .foregroundStyle(Color.echoText)
                 .lineLimit(1)
         }
@@ -102,15 +102,10 @@ struct HomeView: View {
 
     private var todayCard: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Image(systemName: "calendar")
-                    .font(.system(size: 10))
-                    .foregroundStyle(Color.echoSecondary)
-                EyebrowText(text: "Today")
-            }
-            HStack(spacing: 4) {
+            EyebrowText(text: "Today")
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
                 Text("\(transcripts.todayWordCount)")
-                    .font(.echoMono(13, medium: true))
+                    .font(.echoMono(15, medium: true))
                     .foregroundStyle(Color.echoText)
                 Text("words · \(transcripts.todayEntries.count) dictations")
                     .font(.echo(12))
@@ -119,6 +114,50 @@ struct HomeView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .echoCard()
+    }
+
+    // MARK: - Recent
+
+    private var recentSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                EyebrowText(text: "Recent")
+                Spacer()
+                if !transcripts.entries.isEmpty {
+                    Button {
+                        withAnimation(reduceMotion ? nil : Motion.spring) { section = .history }
+                    } label: {
+                        HStack(spacing: 3) {
+                            Text("View all")
+                            Image(systemName: "arrow.right")
+                                .font(.system(size: 9, weight: .semibold))
+                        }
+                        .font(.echo(12, .medium))
+                        .foregroundStyle(Color.echoSecondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            if transcripts.entries.isEmpty {
+                HStack(spacing: 6) {
+                    Text("Nothing here yet — hold")
+                    KeycapView(label: settings.hotkey.label)
+                    Text("and your words land here.")
+                }
+                .font(.echo(13))
+                .foregroundStyle(Color.echoSecondary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 24)
+                .echoCard()
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(transcripts.entries.prefix(3)) { entry in
+                        TranscriptRow(entry: entry, compact: true)
+                    }
+                }
+            }
+        }
     }
 }
 
