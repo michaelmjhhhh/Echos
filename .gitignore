@@ -1,7 +1,53 @@
+# ── macOS system ──────────────────────────────────────────
 .DS_Store
+.AppleDouble
+.LSOverride
+Icon
+.Spotlight-V100
+.Trashes
+.fseventsd
+.DocumentRevisions-V100
+.TemporaryItems
+.com.apple.timemachine.donotpresent
+.VolumeIcon.icns
+
+# ── Xcode ─────────────────────────────────────────────────
 build/
 DerivedData/
-*.xcodeproj
+*.xcuserdata
 *.xcuserstate
-xcuserdata/
+*.moved-aside
+*.xcbkptlist
+*.xccheckout
+*.m2
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+*.nupkg
+*.dylib
+*.o
+
+# XcodeGen — the .xcodeproj is generated from project.yml
+*.xcodeproj
+
+# Swift Package Manager
+.build/
 .swiftpm/
+
+# ── Tooling and editors ───────────────────────────────────
+*~
+*.swp
+*.swo
+*.swn
+*.bak
+*.orig
+
+# ── Python (used by scripts) ──────────────────────────────
+__pycache__/
+*.pyc
+
+# ── Environment ───────────────────────────────────────────
+.env
+.env.local
+.env.*.local
