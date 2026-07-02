@@ -1,0 +1,67 @@
+name: Echo
+options:
+  bundleIdPrefix: com.michael
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+
+packages:
+  ArgmaxOSS:
+    url: https://github.com/argmaxinc/argmax-oss-swift.git
+    from: 0.9.0
+
+targets:
+  Echo:
+    type: application
+    platform: macOS
+    sources:
+      - Echo
+    dependencies:
+      - package: ArgmaxOSS
+        product: WhisperKit
+    info:
+      path: Echo/Info.plist
+      properties:
+        CFBundleDisplayName: Echo
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        LSUIElement: true
+        NSMicrophoneUsageDescription: Echo listens while you hold the dictation key so it can transcribe your speech on-device.
+        LSApplicationCategoryType: public.app-category.productivity
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.michael.echo
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_IDENTITY: "-"
+        ENABLE_HARDENED_RUNTIME: NO
+        ENABLE_APP_SANDBOX: NO
+        SWIFT_VERSION: "5.9"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        GENERATE_INFOPLIST_FILE: NO
+        COMBINE_HIDPI_IMAGES: YES
+
+  EchoTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - EchoTests
+    dependencies:
+      - target: Echo
+    settings:
+      base:
+        CODE_SIGN_IDENTITY: "-"
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Echo.app/Contents/MacOS/Echo"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+
+schemes:
+  Echo:
+    build:
+      targets:
+        Echo: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - EchoTests
