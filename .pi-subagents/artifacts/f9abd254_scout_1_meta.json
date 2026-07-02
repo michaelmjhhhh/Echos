@@ -1,0 +1,36 @@
+{
+  "runId": "f9abd254",
+  "agent": "scout",
+  "task": "## Transcription Latency — In-Depth Codebase Review\n\nYou are investigating how to **minimize latency in the transcription pipeline** of the Echo macOS app. Read the relevant source files and produce concrete, evidence-backed recommendations.\n\n### Context\n\nEcho is a free, on-device dictation macOS app. The full hotkey-to-insertion pipeline:\n1. User holds hotkey (Right ⌥) → audio capture starts (AVAudioEngine, 16 kHz mono)\n2. User releases hotkey → recording stops, samples collected\n3. `state = .transcribing` → `transcriber.transcribe(samples)` called\n4. WhisperKit runs CoreML inference on-device (ANE)\n5. TextProcessor chain processes result\n6. Clipboard ⌘V paste into frontmost app\n7. Usage metrics recorded (duration, latency)\n\n### Key files to inspect (read each fully)\n- `/Users/michael/echo/Echo/DictationController.swift` — pipeline orchestration, timing\n- `/Users/michael/echo/Echo/Transcription/TranscriptionService.swift` — WhisperKit transcription\n- `/Users/michael/echo/Echo/Audio/AudioRecorder.swift` — audio capture, keep-warm logic\n- `/Users/michael/echo/Echo/Audio/AudioLinkWaker.swift` — Bluetooth wake latency\n- `/Users/michael/echo/Echo/Insertion/TextInserter.swift` — ⌘V insertion, clipboard save/restore\n- `/Users/michael/echo/Echo/DictationState.swift` — state machine\n- `/Users/michael/echo/Echo/Settings/SettingsStore.swift` — model variant config\n- `/Users/michael/echo/Echo/Usage/UsageStore.swift` — already tracking latency metrics\n- `/Users/michael/echo/Echo/Hotkey/HotkeyMonitor.swift` — hotkey capture latency\n- `/Users/michael/echo/Echo/Overlay/OverlayController.swift` — UI feedback during transcribing\n\n### Research questions to address\n\n1. **Model loading latency**: The model downloads on first launch (~600 MB), then loads into memory. How does `loadModel()` affect startup? Is there any lazy-loading or memory-mapping opportunity?\n\n2. **Transcription inference latency**: WhisperKit runs the full audio buffer through the model after recording stops. What strategies could reduce latency? Consider:\n   - Streaming/real-time inference (transcribe while still recording)\n   - Running smaller/cheaper model variant for speed\n   - Audio prefixed/chunked processing (VOIP-style)\n   - Prompt caching or model warm-up tricks\n   - `DecodingOptions` tuning (beam size, temperature, best_of)\n\n3. **Audio pipeline latency**: The capture pipeline has an `AVAudioConverter` from the input format to 16 kHz. Is there overhead here? What about the keep-warm pattern (45s engine reuse)?\n\n4. **Bluetooth mic wake latency**: `AudioLinkWaker` plays 0.4s of silence to wake Bluetooth links. Is this sufficient? Could the wake happen earlier (e.g., pre-warm on app launch or mouse activity)?\n\n5. **Post-processing latency**: Whitespace cleanup is trivial, but what if more processing (LLM) is added? How to keep this fast?\n\n6. **Insertion latency**: Clipboard save/restore with 0.7s restore delay. Could this be optimized? What about using Accessibility API directly for insertion instead of clipboard?\n\n7. **Overlay latency**: The overlay panel shows 'Transcribing…' — any measurable overhead from state publishing/UI updates on the transcript path?\n\n8. **Measured latency**: UsageStore already captures `latency_seconds`. What does typical latency look like? Any patterns in the latency data?\n\n### Output format\n\nWrite your findings to `/tmp/echo-latency-review.md` with:\n- Executive summary (top 3-5 latency reduction opportunities ranked by impact)\n- Detailed analysis per area with file/line references\n- Concrete code change suggestions where applicable (with before/after sketches)\n- Measurable latency budgets and targets (e.g., 'transcription inference under X seconds for Y seconds of audio')\n- Trade-offs: latency vs. accuracy, battery, memory\n\nDo NOT modify any project source files. This is a read-only review.\n\n---\n**Output:**\nWrite your findings to exactly this path: /tmp/echo-latency-review.md\nThis path is authoritative for this run.\nIgnore any other output filename or output path mentioned elsewhere, including output destinations in the base agent prompt, system prompt, or task instructions.",
+  "exitCode": 0,
+  "usage": {
+    "input": 20580,
+    "output": 9898,
+    "cacheRead": 159744,
+    "cacheWrite": 0,
+    "cost": 0,
+    "turns": 10
+  },
+  "model": "opencode/big-pickle",
+  "attemptedModels": [
+    "opencode/big-pickle"
+  ],
+  "modelAttempts": [
+    {
+      "model": "opencode/big-pickle",
+      "success": true,
+      "exitCode": 0,
+      "usage": {
+        "input": 20580,
+        "output": 9898,
+        "cacheRead": 159744,
+        "cacheWrite": 0,
+        "cost": 0,
+        "turns": 10
+      }
+    }
+  ],
+  "durationMs": 130980,
+  "toolCount": 27,
+  "timestamp": 1782991360343
+}

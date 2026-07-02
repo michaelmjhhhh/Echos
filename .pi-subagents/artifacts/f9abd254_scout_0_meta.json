@@ -1,0 +1,36 @@
+{
+  "runId": "f9abd254",
+  "agent": "scout",
+  "task": "## Transcription Quality Improvement — In-Depth Codebase Review\n\nYou are investigating how to **improve voice-to-text transcription quality** in the Echo macOS app. Read the relevant source files and produce concrete, evidence-backed recommendations.\n\n### Context\n\nEcho is a free, on-device dictation macOS app that uses **WhisperKit** (Apple CoreML port of Whisper) for transcription. The pipeline:\n1. AVAudioEngine captures 16 kHz mono Float32 audio\n2. WhisperKit transcribes on-device via ANE\n3. TextProcessor chain post-processes (currently only whitespace cleanup)\n4. Text is inserted via clipboard ⌘V paste\n\n### Key files to inspect (read each fully)\n- `/Users/michael/echo/Echo/Transcription/TranscriptionService.swift` — WhisperKit wrapper\n- `/Users/michael/echo/Echo/Audio/AudioRecorder.swift` — audio capture quality\n- `/Users/michael/echo/Echo/Processing/TextProcessor.swift` — post-processing pipeline\n- `/Users/michael/echo/Echo/Settings/SettingsStore.swift` — model variant config (default: distil-whisper_distil-large-v3_594MB)\n- `/Users/michael/echo/Echo/DictationController.swift` — orchestration\n- `/Users/michael/echo/Echo/Usage/UsageStore.swift` — latency tracking\n\n### Research questions to address\n\n1. **Audio quality**: How does the capture pipeline affect transcription accuracy? Are there sample rate, bit depth, or channel issues? What about the format conversion from the input device to 16 kHz?\n\n2. **Model selection**: The default model is `distil-whisper_distil-large-v3_594MB` (~594 MB). What are the accuracy trade-offs of smaller/larger Whisper models available through WhisperKit? Could a full (non-distilled) model improve accuracy? Are there multilingual or punctuation-aware alternatives?\n\n3. **Post-processing pipeline**: Currently only `WhitespaceCleanupProcessor`. What additional processing stages could improve output quality? Consider: punctuation restoration (the comment in TextProcessor.swift mentions a local LLM cleanup stage), capitalization, grammar correction, de-duplication/n-gram confidence filtering.\n\n4. **Language handling**: The code hard-codes `language: \"en\"` — what about code-switching, accents, or non-native speakers? Could automatic language detection help?\n\n5. **Transcription parameters**: The `DecodingOptions` in TranscriptionService.swift uses minimal config. What decoding strategies (beam search, temperature, best_of, compression_ratio_threshold) could improve accuracy?\n\n6. **Model caching/preparation**: How does model download and loading work? Any room for improvement in how the model is prepared?\n\n### Output format\n\nWrite your findings to `/tmp/echo-quality-review.md` with:\n- Executive summary (top 3-5 recommendations ranked by impact)\n- Detailed analysis per research area with file/line references\n- Concrete code change suggestions where applicable\n- Trade-offs considered (accuracy vs. size, speed, memory)\n\nDo NOT modify any project source files. This is a read-only review.\n\n---\n**Output:**\nWrite your findings to exactly this path: /tmp/echo-quality-review.md\nThis path is authoritative for this run.\nIgnore any other output filename or output path mentioned elsewhere, including output destinations in the base agent prompt, system prompt, or task instructions.",
+  "exitCode": 0,
+  "usage": {
+    "input": 41105,
+    "output": 11024,
+    "cacheRead": 505984,
+    "cacheWrite": 0,
+    "cost": 0,
+    "turns": 19
+  },
+  "model": "opencode/big-pickle",
+  "attemptedModels": [
+    "opencode/big-pickle"
+  ],
+  "modelAttempts": [
+    {
+      "model": "opencode/big-pickle",
+      "success": true,
+      "exitCode": 0,
+      "usage": {
+        "input": 41105,
+        "output": 11024,
+        "cacheRead": 505984,
+        "cacheWrite": 0,
+        "cost": 0,
+        "turns": 19
+      }
+    }
+  ],
+  "durationMs": 215553,
+  "toolCount": 44,
+  "timestamp": 1782991444914
+}

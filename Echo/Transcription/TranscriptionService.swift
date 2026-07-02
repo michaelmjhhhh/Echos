@@ -30,10 +30,21 @@ final class TranscriptionService: Transcribing {
         let config = WhisperKitConfig(
             model: modelVariant,
             modelFolder: modelFolder?.path,
+            prewarm: true,
             load: true,
             download: false
         )
-        whisperKit = try await WhisperKit(config)
+        let kit = try await WhisperKit(config)
+        whisperKit = kit
+
+        // One throwaway inference so the whole pipeline (feature extractor,
+        // decoder loop, tokenizer, memory pools) is warm before the app
+        // reports ready — otherwise the first real dictation pays a 2–5 s
+        // cold start. Failure here must never fail loading.
+        _ = try? await kit.transcribe(
+            audioArray: [Float](repeating: 0, count: 1600), // 0.1 s of silence
+            decodeOptions: DecodingOptions(task: .transcribe, language: "en", skipSpecialTokens: true)
+        )
     }
 
     func transcribe(_ samples: [Float]) async throws -> String {

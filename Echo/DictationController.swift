@@ -32,6 +32,10 @@ final class DictationController: ObservableObject {
     private let minimumSampleCount = Int(0.3 * Double(AudioRecorder.sampleRate))
     /// Auto-stop cap so a stuck key can't record forever.
     private let maxRecordingSeconds: Double = 120
+    /// How long to wait for first audio before nudging a dormant Bluetooth
+    /// mic. Built-in mics deliver within ~100–200 ms, so this rarely fires
+    /// spuriously — and the nudge is silent and harmless if it does.
+    private let micWakeDelay: Duration = .milliseconds(300)
 
     /// Exposed so tests (and the UI, if ever needed) can await the in-flight transcription.
     private(set) var transcriptionTask: Task<Void, Never>?
@@ -165,8 +169,8 @@ final class DictationController: ObservableObject {
         // If the mic hasn't produced audio shortly after starting, nudge the
         // output side — a dormant Bluetooth link often needs outbound audio
         // before it will bring the microphone up at all.
-        micWakeTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(600))
+        micWakeTask = Task { [weak self, micWakeDelay] in
+            try? await Task.sleep(for: micWakeDelay)
             guard !Task.isCancelled, let self,
                   case .recording = self.state, !self.micReady else { return }
             self.linkWaker.wake()

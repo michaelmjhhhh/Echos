@@ -101,7 +101,10 @@ final class AudioRecorder: AudioRecording {
             throw AudioRecorderError.formatConversionUnavailable
         }
 
-        input.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
+        // Small buffers: the final partial buffer on key-release arrives ~64 ms
+        // sooner and at most ~21 ms of trailing speech stays undelivered
+        // (vs ~85 ms at 4096), and the waveform level updates ~4× as often.
+        input.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { [weak self] buffer, _ in
             self?.append(buffer, using: converter, targetFormat: targetFormat)
         }
         engine.prepare()
