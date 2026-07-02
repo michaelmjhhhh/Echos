@@ -35,7 +35,6 @@ struct SettingsView: View {
             }
 
             Section {
-                Toggle("Play sounds when recording starts and stops", isOn: $settings.playSounds)
                 Toggle("Start Echo at login", isOn: $settings.launchAtLogin)
             }
 

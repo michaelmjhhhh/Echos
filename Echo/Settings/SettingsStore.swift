@@ -12,9 +12,6 @@ final class SettingsStore: ObservableObject {
     @Published var hotkey: Hotkey {
         didSet { defaults.set(hotkey.rawValue, forKey: Keys.hotkey) }
     }
-    @Published var playSounds: Bool {
-        didSet { defaults.set(playSounds, forKey: Keys.playSounds) }
-    }
     @Published var modelVariant: String {
         didSet { defaults.set(modelVariant, forKey: Keys.modelVariant) }
     }
@@ -30,7 +27,6 @@ final class SettingsStore: ObservableObject {
 
     private enum Keys {
         static let hotkey = "hotkey"
-        static let playSounds = "playSounds"
         static let modelVariant = "modelVariant"
         static let inputDeviceUID = "inputDeviceUID"
     }
@@ -38,8 +34,6 @@ final class SettingsStore: ObservableObject {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         self.hotkey = defaults.string(forKey: Keys.hotkey).flatMap(Hotkey.init(rawValue:)) ?? .rightOption
-        // The floating overlay is the primary feedback; sounds are opt-in.
-        self.playSounds = defaults.object(forKey: Keys.playSounds) as? Bool ?? false
         self.modelVariant = defaults.string(forKey: Keys.modelVariant) ?? Self.defaultModelVariant
         self.inputDeviceUID = defaults.string(forKey: Keys.inputDeviceUID)
         self.launchAtLogin = SMAppService.mainApp.status == .enabled

@@ -4,6 +4,7 @@ import SwiftUI
 final class OverlayModel: ObservableObject {
     @Published var state: DictationState = .idle
     @Published var level: Float = 0
+    @Published var micReady = false
 }
 
 /// The floating pill shown near the bottom of the screen while dictating —
@@ -15,9 +16,16 @@ struct OverlayView: View {
         HStack(spacing: 10) {
             switch model.state {
             case .recording:
-                Image(systemName: "mic.fill")
-                    .foregroundStyle(.red)
-                LevelWaveform(level: model.level)
+                if model.micReady {
+                    Image(systemName: "mic.fill")
+                        .foregroundStyle(.red)
+                    LevelWaveform(level: model.level)
+                } else {
+                    ProgressView()
+                        .controlSize(.small)
+                        .colorScheme(.dark)
+                    Text("Starting mic…")
+                }
             case .transcribing:
                 ProgressView()
                     .controlSize(.small)

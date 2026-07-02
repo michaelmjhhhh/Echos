@@ -31,7 +31,6 @@ struct MenuContentView: View {
         }
 
         Toggle("Start at Login", isOn: $settings.launchAtLogin)
-        Toggle("Sounds", isOn: $settings.playSounds)
 
         SettingsLink {
             Text("Settings…")

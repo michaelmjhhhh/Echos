@@ -13,7 +13,6 @@ final class DictationControllerTests: XCTestCase {
         inserter = MockInserter()
         let defaults = UserDefaults(suiteName: "EchoTests-\(UUID().uuidString)")!
         let settings = SettingsStore(defaults: defaults)
-        settings.playSounds = false
         return DictationController(
             settings: settings,
             recorder: recorder,
@@ -104,6 +103,17 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertTrue(message.contains("clipboard"))
     }
 
+    func testQuickTapWithNoAudioIsSilentlyIgnored() {
+        let controller = makeController()
+        controller.activateForTesting()
+        recorder.signalsCaptureReady = false
+        recorder.samplesToReturn = []
+        controller.hotkeyPressed()
+        controller.hotkeyReleased()
+        XCTAssertEqual(controller.state, .idle)
+        XCTAssertNil(inserter.insertedText)
+    }
+
     func testReleaseWithoutPressDoesNothing() {
         let controller = makeController()
         controller.activateForTesting()
@@ -117,9 +127,14 @@ final class DictationControllerTests: XCTestCase {
 private final class MockRecorder: AudioRecording {
     var isRecording = false
     var samplesToReturn: [Float] = []
+    var signalsCaptureReady = true
     var onLevel: ((Float) -> Void)?
+    var onCaptureReady: (() -> Void)?
 
-    func start(deviceUID: String?) throws { isRecording = true }
+    func start(deviceUID: String?) throws {
+        isRecording = true
+        if signalsCaptureReady { onCaptureReady?() }
+    }
 
     func stop() -> [Float] {
         isRecording = false

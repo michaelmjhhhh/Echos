@@ -12,8 +12,9 @@ final class OverlayController {
     private lazy var panel: NSPanel = makePanel()
     private var isVisible = false
 
-    func update(state: DictationState, level: Float) {
+    func update(state: DictationState, level: Float, micReady: Bool) {
         model.level = level
+        model.micReady = micReady
         guard state != model.state else { return }
         model.state = state
         switch state {

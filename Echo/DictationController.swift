@@ -7,6 +7,9 @@ final class DictationController: ObservableObject {
     @Published private(set) var lastTranscript: String = ""
     /// Live microphone level (0...1) while recording, drives the overlay waveform.
     @Published private(set) var audioLevel: Float = 0
+    /// False until real audio arrives for the current recording — Bluetooth mics
+    /// take seconds to wake, and the overlay shows "Starting mic…" until then.
+    @Published private(set) var micReady = false
 
     private let settings: SettingsStore
     private let recorder: AudioRecording
@@ -16,6 +19,7 @@ final class DictationController: ObservableObject {
     private var hotkeyMonitor: HotkeyMonitoring
     private var overlay: OverlayController?
     private var maxDurationTask: Task<Void, Never>?
+    private var recordingStartedAt: Date?
     private var cancellables: Set<AnyCancellable> = []
 
     /// Recordings shorter than this are treated as accidental taps.
@@ -48,6 +52,13 @@ final class DictationController: ObservableObject {
         self.recorder.onLevel = { [weak self] level in
             Task { @MainActor in self?.audioLevel = level }
         }
+        self.recorder.onCaptureReady = { [weak self] in
+            if Thread.isMainThread {
+                MainActor.assumeIsolated { self?.micReady = true }
+            } else {
+                Task { @MainActor in self?.micReady = true }
+            }
+        }
 
         settings.$hotkey
             .removeDuplicates()
@@ -58,8 +69,10 @@ final class DictationController: ObservableObject {
         if autostart && !isHostingTests {
             let overlay = OverlayController()
             self.overlay = overlay
-            $state.combineLatest($audioLevel)
-                .sink { state, level in overlay.update(state: state, level: level) }
+            Publishers.CombineLatest3($state, $audioLevel, $micReady)
+                .sink { state, level, micReady in
+                    overlay.update(state: state, level: level, micReady: micReady)
+                }
                 .store(in: &cancellables)
             Task { await start() }
         }
@@ -111,6 +124,7 @@ final class DictationController: ObservableObject {
 
     func hotkeyPressed() {
         guard case .idle = state else { return }
+        micReady = false
         do {
             try recorder.start(deviceUID: settings.inputDeviceUID)
         } catch {
@@ -118,8 +132,8 @@ final class DictationController: ObservableObject {
             scheduleReturnToIdle()
             return
         }
+        recordingStartedAt = Date()
         state = .recording
-        playSound("Tink")
         maxDurationTask = Task { [weak self, maxRecordingSeconds] in
             try? await Task.sleep(for: .seconds(maxRecordingSeconds))
             guard !Task.isCancelled else { return }
@@ -136,7 +150,20 @@ final class DictationController: ObservableObject {
         maxDurationTask?.cancel()
         maxDurationTask = nil
         let samples = recorder.stop()
-        playSound("Pop")
+        let heldFor = recordingStartedAt.map { Date().timeIntervalSince($0) } ?? 0
+        recordingStartedAt = nil
+
+        guard micReady else {
+            // A quick tap before any audio arrives is just an accidental press;
+            // a sustained hold with nothing captured means the mic never woke up.
+            if heldFor >= 0.8 {
+                state = .error("No audio from the microphone — try another input in the Echo menu")
+                scheduleReturnToIdle()
+            } else {
+                state = .idle
+            }
+            return
+        }
 
         guard samples.count >= minimumSampleCount else {
             state = .idle
@@ -178,8 +205,4 @@ final class DictationController: ObservableObject {
         }
     }
 
-    private func playSound(_ name: String) {
-        guard settings.playSounds else { return }
-        NSSound(named: name)?.play()
-    }
 }
