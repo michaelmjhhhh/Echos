@@ -26,6 +26,7 @@ targets:
         CFBundleShortVersionString: "0.2.0"
         CFBundleVersion: "2"
         CFBundleIconFile: AppIcon
+        ATSApplicationFontsPath: "."
         NSMicrophoneUsageDescription: Echo listens while you hold the dictation key so it can transcribe your speech on-device.
         LSApplicationCategoryType: public.app-category.productivity
     settings:

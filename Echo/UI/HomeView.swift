@@ -37,7 +37,8 @@ struct HomeView: View {
             WaveformRibbon(level: controller.audioLevel, isLive: isLive)
 
             Text(heroStatus)
-                .font(.system(size: 19, weight: .semibold, design: .rounded))
+                .font(.echoDisplay(19))
+                .tracking(-0.3)
                 .foregroundStyle(Color.echoText)
 
             HStack(spacing: 6) {
@@ -47,7 +48,7 @@ struct HomeView: View {
                 Text("in any app — release to insert your words at the cursor.")
                     .foregroundStyle(Color.echoSecondary)
             }
-            .font(.system(size: 12))
+            .font(.echo(12))
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 30)
@@ -91,7 +92,7 @@ struct HomeView: View {
                 EyebrowText(text: eyebrow)
             }
             Text(value)
-                .font(.system(size: 13, weight: .medium))
+                .font(.echo(13, .medium))
                 .foregroundStyle(Color.echoText)
                 .lineLimit(1)
         }
@@ -109,10 +110,10 @@ struct HomeView: View {
             }
             HStack(spacing: 4) {
                 Text("\(transcripts.todayWordCount)")
-                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                    .font(.echoMono(13, medium: true))
                     .foregroundStyle(Color.echoText)
                 Text("words · \(transcripts.todayEntries.count) dictations")
-                    .font(.system(size: 12))
+                    .font(.echo(12))
                     .foregroundStyle(Color.echoSecondary)
             }
         }
@@ -131,10 +132,10 @@ private struct PermissionsBanner: View {
                 .foregroundStyle(Color.echoCoral)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Echo needs permission to work")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.echo(13, .semibold))
                     .foregroundStyle(Color.echoText)
                 Text("Dictation stays paused until access is granted.")
-                    .font(.system(size: 12))
+                    .font(.echo(12))
                     .foregroundStyle(Color.echoSecondary)
             }
             Spacer()

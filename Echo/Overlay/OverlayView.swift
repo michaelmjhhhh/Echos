@@ -40,7 +40,7 @@ struct OverlayView: View {
                 EmptyView()
             }
         }
-        .font(.system(size: 13, weight: .medium))
+        .font(.echo(13, .medium))
         .foregroundStyle(.white)
         .padding(.horizontal, 18)
         .frame(height: 38)

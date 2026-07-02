@@ -40,7 +40,7 @@ struct HistoryView: View {
                     .foregroundStyle(Color.echoSecondary)
                 TextField("Search transcripts", text: $query)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 13))
+                    .font(.echo(13))
                     .foregroundStyle(Color.echoText)
             }
             .padding(.horizontal, 10)
@@ -77,16 +77,16 @@ struct HistoryView: View {
                         KeycapView(label: settings.hotkey.label)
                         Text("in any app and your words land here.")
                     }
-                    .font(.system(size: 13))
+                    .font(.echo(13))
                     .foregroundStyle(Color.echoSecondary)
                 } else {
                     Text("History is turned off in Settings.")
-                        .font(.system(size: 13))
+                        .font(.echo(13))
                         .foregroundStyle(Color.echoSecondary)
                 }
             } else {
                 Text("No transcripts match “\(query)”.")
-                    .font(.system(size: 13))
+                    .font(.echo(13))
                     .foregroundStyle(Color.echoSecondary)
             }
             Spacer()
@@ -104,7 +104,7 @@ private struct HistoryRow: View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 6) {
                 Text(entry.text)
-                    .font(.system(size: 13))
+                    .font(.echo(13))
                     .foregroundStyle(Color.echoText)
                     .lineLimit(3)
                     .multilineTextAlignment(.leading)
@@ -114,7 +114,7 @@ private struct HistoryRow: View {
                     Text("·")
                     Text("\(entry.wordCount) words")
                 }
-                .font(.system(size: 11, design: .monospaced))
+                .font(.echoMono(11))
                 .foregroundStyle(Color.echoSecondary)
             }
             Spacer()
@@ -129,7 +129,7 @@ private struct HistoryRow: View {
                     }
                 } label: {
                     Label(justCopied ? "Copied" : "Copy", systemImage: justCopied ? "checkmark" : "doc.on.doc")
-                        .font(.system(size: 11, weight: .medium))
+                        .font(.echo(11, .medium))
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(justCopied ? Color.green : Color.echoSecondary)

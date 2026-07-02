@@ -36,6 +36,17 @@ struct SettingsView: View {
                 }
 
                 settingsCard(eyebrow: "Behavior") {
+                    labeledRow("Appearance") {
+                        Picker("", selection: $settings.appearance) {
+                            ForEach(AppAppearance.allCases) { appearance in
+                                Text(appearance.label).tag(appearance)
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.segmented)
+                        .frame(width: 220)
+                    }
+                    hairline
                     labeledRow("Start Echo at login") {
                         Toggle("", isOn: $settings.launchAtLogin)
                             .labelsHidden()
@@ -55,7 +66,7 @@ struct SettingsView: View {
                 settingsCard(eyebrow: "Model") {
                     labeledRow("Speech model") {
                         Text(settings.modelVariant)
-                            .font(.system(size: 12, design: .monospaced))
+                            .font(.echoMono(12))
                             .foregroundStyle(Color.echoSecondary)
                     }
                     footnote("English-optimized Whisper, runs fully on-device. To try another variant: defaults write com.michael.echo modelVariant <name>, then relaunch Echo.")
@@ -78,7 +89,7 @@ struct SettingsView: View {
     private func labeledRow(_ label: String, @ViewBuilder control: () -> some View) -> some View {
         HStack {
             Text(label)
-                .font(.system(size: 13))
+                .font(.echo(13))
                 .foregroundStyle(Color.echoText)
             Spacer()
             control()
@@ -91,7 +102,7 @@ struct SettingsView: View {
 
     private func footnote(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 11))
+            .font(.echo(11))
             .foregroundStyle(Color.echoSecondary)
             .fixedSize(horizontal: false, vertical: true)
     }

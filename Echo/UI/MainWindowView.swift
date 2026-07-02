@@ -60,7 +60,8 @@ struct MainWindowView: View {
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(Color.echoCoral)
                 Text("Echo")
-                    .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    .font(.echoDisplay(16))
+                    .tracking(-0.2)
                     .foregroundStyle(Color.echoText)
             }
             .padding(.horizontal, 12)
@@ -89,7 +90,7 @@ struct MainWindowView: View {
                     .fill(statusColor)
                     .frame(width: 7, height: 7)
                 Text(shortStatus)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.echo(11, .medium))
                     .foregroundStyle(Color.echoText)
                     .lineLimit(1)
             }
@@ -98,7 +99,7 @@ struct MainWindowView: View {
                     .font(.system(size: 9))
                     .foregroundStyle(Color.echoSecondary)
                 Text(microphoneName)
-                    .font(.system(size: 11))
+                    .font(.echo(11))
                     .foregroundStyle(Color.echoSecondary)
                     .lineLimit(1)
             }
@@ -152,7 +153,7 @@ private struct SidebarRow: View {
                     .frame(width: 18)
                     .foregroundStyle(isSelected ? Color.echoText : Color.echoSecondary)
                 Text(section.title)
-                    .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
+                    .font(.echo(13, isSelected ? .semibold : .regular))
                     .foregroundStyle(isSelected ? Color.echoText : Color.echoSecondary)
                 Spacer()
             }

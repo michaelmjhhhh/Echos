@@ -1,6 +1,30 @@
-import Foundation
+import AppKit
 import Combine
 import ServiceManagement
+
+enum AppAppearance: String, CaseIterable, Identifiable {
+    case system
+    case light
+    case dark
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .system: return "System"
+        case .light: return "Light"
+        case .dark: return "Dark"
+        }
+    }
+
+    var nsAppearance: NSAppearance? {
+        switch self {
+        case .system: return nil
+        case .light: return NSAppearance(named: .aqua)
+        case .dark: return NSAppearance(named: .darkAqua)
+        }
+    }
+}
 
 @MainActor
 final class SettingsStore: ObservableObject {
@@ -23,6 +47,12 @@ final class SettingsStore: ObservableObject {
     @Published var saveHistory: Bool {
         didSet { defaults.set(saveHistory, forKey: Keys.saveHistory) }
     }
+    @Published var appearance: AppAppearance {
+        didSet {
+            defaults.set(appearance.rawValue, forKey: Keys.appearance)
+            applyAppearance()
+        }
+    }
     @Published var launchAtLogin: Bool {
         didSet { updateLaunchAtLogin() }
     }
@@ -34,6 +64,7 @@ final class SettingsStore: ObservableObject {
         static let modelVariant = "modelVariant"
         static let inputDeviceUID = "inputDeviceUID"
         static let saveHistory = "saveHistory"
+        static let appearance = "appearance"
     }
 
     init(defaults: UserDefaults = .standard) {
@@ -42,7 +73,14 @@ final class SettingsStore: ObservableObject {
         self.modelVariant = defaults.string(forKey: Keys.modelVariant) ?? Self.defaultModelVariant
         self.inputDeviceUID = defaults.string(forKey: Keys.inputDeviceUID)
         self.saveHistory = defaults.object(forKey: Keys.saveHistory) as? Bool ?? true
+        self.appearance = defaults.string(forKey: Keys.appearance)
+            .flatMap(AppAppearance.init(rawValue:)) ?? .system
         self.launchAtLogin = SMAppService.mainApp.status == .enabled
+        applyAppearance()
+    }
+
+    func applyAppearance() {
+        NSApp?.appearance = appearance.nsAppearance
     }
 
     private func updateLaunchAtLogin() {

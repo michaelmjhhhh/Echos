@@ -21,6 +21,36 @@ extension Color {
     }
 }
 
+/// Echo's type system: Inter for UI, JetBrains Mono for data. Both are bundled
+/// (Resources/Fonts, registered via ATSApplicationFontsPath).
+enum EchoFontWeight {
+    case regular, medium, semibold, bold
+
+    var interName: String {
+        switch self {
+        case .regular: return "Inter-Regular"
+        case .medium: return "Inter-Medium"
+        case .semibold: return "Inter-SemiBold"
+        case .bold: return "Inter-Bold"
+        }
+    }
+}
+
+extension Font {
+    static func echo(_ size: CGFloat, _ weight: EchoFontWeight = .regular) -> Font {
+        .custom(weight.interName, size: size)
+    }
+
+    static func echoMono(_ size: CGFloat, medium: Bool = false) -> Font {
+        .custom(medium ? "JetBrainsMono-Medium" : "JetBrainsMono-Regular", size: size)
+    }
+
+    /// Hero/display text — Inter SemiBold, pair with slight negative tracking.
+    static func echoDisplay(_ size: CGFloat) -> Font {
+        .custom("Inter-SemiBold", size: size)
+    }
+}
+
 extension NSColor {
     convenience init(hex: UInt32) {
         self.init(
@@ -56,7 +86,7 @@ struct KeycapView: View {
 
     var body: some View {
         Text(label)
-            .font(.system(size: 12, weight: .semibold, design: .rounded))
+            .font(.echo(12, .semibold))
             .foregroundStyle(Color.echoText)
             .padding(.horizontal, 9)
             .padding(.vertical, 4)
@@ -75,7 +105,7 @@ struct EyebrowText: View {
 
     var body: some View {
         Text(text.uppercased())
-            .font(.system(size: 10, weight: .semibold))
+            .font(.echo(10, .semibold))
             .tracking(1.1)
             .foregroundStyle(Color.echoSecondary)
     }
