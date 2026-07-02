@@ -23,6 +23,13 @@ struct MenuContentView: View {
 
         Divider()
 
+        Picker("Microphone", selection: $settings.inputDeviceUID) {
+            Text("System Default").tag(String?.none)
+            ForEach(AudioInputDevices.all()) { device in
+                Text(device.name).tag(String?.some(device.uid))
+            }
+        }
+
         Toggle("Start at Login", isOn: $settings.launchAtLogin)
         Toggle("Sounds", isOn: $settings.playSounds)
 

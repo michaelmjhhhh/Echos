@@ -18,6 +18,10 @@ final class SettingsStore: ObservableObject {
     @Published var modelVariant: String {
         didSet { defaults.set(modelVariant, forKey: Keys.modelVariant) }
     }
+    /// Core Audio device UID of the chosen microphone; nil = system default.
+    @Published var inputDeviceUID: String? {
+        didSet { defaults.set(inputDeviceUID, forKey: Keys.inputDeviceUID) }
+    }
     @Published var launchAtLogin: Bool {
         didSet { updateLaunchAtLogin() }
     }
@@ -28,13 +32,16 @@ final class SettingsStore: ObservableObject {
         static let hotkey = "hotkey"
         static let playSounds = "playSounds"
         static let modelVariant = "modelVariant"
+        static let inputDeviceUID = "inputDeviceUID"
     }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         self.hotkey = defaults.string(forKey: Keys.hotkey).flatMap(Hotkey.init(rawValue:)) ?? .rightOption
-        self.playSounds = defaults.object(forKey: Keys.playSounds) as? Bool ?? true
+        // The floating overlay is the primary feedback; sounds are opt-in.
+        self.playSounds = defaults.object(forKey: Keys.playSounds) as? Bool ?? false
         self.modelVariant = defaults.string(forKey: Keys.modelVariant) ?? Self.defaultModelVariant
+        self.inputDeviceUID = defaults.string(forKey: Keys.inputDeviceUID)
         self.launchAtLogin = SMAppService.mainApp.status == .enabled
     }
 

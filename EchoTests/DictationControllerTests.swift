@@ -117,8 +117,9 @@ final class DictationControllerTests: XCTestCase {
 private final class MockRecorder: AudioRecording {
     var isRecording = false
     var samplesToReturn: [Float] = []
+    var onLevel: ((Float) -> Void)?
 
-    func start() throws { isRecording = true }
+    func start(deviceUID: String?) throws { isRecording = true }
 
     func stop() -> [Float] {
         isRecording = false

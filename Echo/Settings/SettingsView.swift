@@ -2,9 +2,22 @@ import SwiftUI
 
 struct SettingsView: View {
     @EnvironmentObject private var settings: SettingsStore
+    @State private var inputDevices: [AudioInputDevice] = []
 
     var body: some View {
         Form {
+            Section {
+                Picker("Microphone", selection: $settings.inputDeviceUID) {
+                    Text("System Default").tag(String?.none)
+                    ForEach(inputDevices) { device in
+                        Text(device.name).tag(String?.some(device.uid))
+                    }
+                }
+                Text("“System Default” follows whatever macOS is currently using — pick a specific device if a Bluetooth mic (e.g. AirPods) misbehaves.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
             Section {
                 Picker("Dictation key", selection: $settings.hotkey) {
                     ForEach(Hotkey.allCases) { hotkey in
@@ -36,5 +49,6 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .frame(width: 440)
         .fixedSize()
+        .onAppear { inputDevices = AudioInputDevices.all() }
     }
 }

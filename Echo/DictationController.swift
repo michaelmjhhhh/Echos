@@ -5,6 +5,8 @@ import Combine
 final class DictationController: ObservableObject {
     @Published private(set) var state: DictationState = .launching
     @Published private(set) var lastTranscript: String = ""
+    /// Live microphone level (0...1) while recording, drives the overlay waveform.
+    @Published private(set) var audioLevel: Float = 0
 
     private let settings: SettingsStore
     private let recorder: AudioRecording
@@ -12,6 +14,7 @@ final class DictationController: ObservableObject {
     private let inserter: TextInserting
     private let processors: [TextProcessor]
     private var hotkeyMonitor: HotkeyMonitoring
+    private var overlay: OverlayController?
     private var maxDurationTask: Task<Void, Never>?
     private var cancellables: Set<AnyCancellable> = []
 
@@ -42,6 +45,10 @@ final class DictationController: ObservableObject {
         self.hotkeyMonitor.onKeyDown = { [weak self] in self?.hotkeyPressed() }
         self.hotkeyMonitor.onKeyUp = { [weak self] in self?.hotkeyReleased() }
 
+        self.recorder.onLevel = { [weak self] level in
+            Task { @MainActor in self?.audioLevel = level }
+        }
+
         settings.$hotkey
             .removeDuplicates()
             .sink { [weak self] hotkey in self?.hotkeyMonitor.hotkey = hotkey }
@@ -49,6 +56,11 @@ final class DictationController: ObservableObject {
 
         let isHostingTests = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
         if autostart && !isHostingTests {
+            let overlay = OverlayController()
+            self.overlay = overlay
+            $state.combineLatest($audioLevel)
+                .sink { state, level in overlay.update(state: state, level: level) }
+                .store(in: &cancellables)
             Task { await start() }
         }
     }
@@ -100,7 +112,7 @@ final class DictationController: ObservableObject {
     func hotkeyPressed() {
         guard case .idle = state else { return }
         do {
-            try recorder.start()
+            try recorder.start(deviceUID: settings.inputDeviceUID)
         } catch {
             state = .error("Microphone failed: \(error.localizedDescription)")
             scheduleReturnToIdle()
