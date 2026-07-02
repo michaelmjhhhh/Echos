@@ -1,5 +1,5 @@
-// Renders Echo's app icon: coral waveform on a graphite gradient, Big Sur-style
-// rounded square. Usage: swift scripts/make_icon.swift <output.png>
+// Renders Echo's app icon: mesh-cyan waveform on flat studio grey ("3D Sculpt"
+// system — flat on purpose). Usage: swift scripts/make_icon.swift <output.png>
 import AppKit
 
 let size: CGFloat = 1024
@@ -12,11 +12,10 @@ let squircle = NSBezierPath(
     xRadius: 185,
     yRadius: 185
 )
-let top = NSColor(red: 0.196, green: 0.192, blue: 0.224, alpha: 1)
-let bottom = NSColor(red: 0.090, green: 0.086, blue: 0.110, alpha: 1)
-NSGradient(starting: top, ending: bottom)!.draw(in: squircle, angle: -90)
+NSColor(red: 0.137, green: 0.137, blue: 0.153, alpha: 1).setFill() // #232327
+squircle.fill()
 
-NSColor(red: 1.0, green: 0.36, blue: 0.36, alpha: 1).setFill()
+NSColor(red: 0.0, green: 0.749, blue: 0.812, alpha: 1).setFill() // #00BFCF
 let heights: [CGFloat] = [0.30, 0.55, 0.85, 1.0, 0.72, 0.45, 0.26]
 let barWidth: CGFloat = 52
 let spacing: CGFloat = 40

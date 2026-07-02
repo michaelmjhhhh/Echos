@@ -168,7 +168,7 @@ private struct PermissionsBanner: View {
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(Color.echoCoral)
+                .foregroundStyle(Color.echoWarning)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Echo needs permission to work")
                     .font(.echo(13, .semibold))

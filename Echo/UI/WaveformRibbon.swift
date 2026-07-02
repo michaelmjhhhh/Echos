@@ -18,12 +18,6 @@ struct WaveformRibbon: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var history: [Float] = Array(repeating: 0, count: WaveformRibbon.barCount)
 
-    private static let liveGradient = LinearGradient(
-        colors: [.echoCoralLight, .echoCoralDeep],
-        startPoint: .top,
-        endPoint: .bottom
-    )
-
     var body: some View {
         TimelineView(.animation(minimumInterval: 1 / 24, paused: reduceMotion && !isLive)) { timeline in
             let time = timeline.date.timeIntervalSinceReferenceDate
@@ -51,15 +45,8 @@ struct WaveformRibbon: View {
             : CGFloat(breathing)
         let height = 6 + envelope * fraction * 72
 
-        if isLive {
-            Capsule()
-                .fill(Self.liveGradient)
-                .frame(width: 4, height: height)
-                .shadow(color: Color.echoCoral.opacity(0.35), radius: 12)
-        } else {
-            Capsule()
-                .fill(Color.echoSecondary.opacity(0.35))
-                .frame(width: 4, height: height)
-        }
+        Capsule()
+            .fill(isLive ? Color.echoAccent : Color.echoSecondary.opacity(0.35))
+            .frame(width: 4, height: height)
     }
 }

@@ -10,6 +10,10 @@ final class OverlayModel: ObservableObject {
 /// The floating pill shown near the bottom of the screen while dictating —
 /// visual feedback that replaces the start/stop sounds.
 struct OverlayView: View {
+    /// The pill is always dark regardless of app appearance, so it uses the
+    /// fixed dark-mode accent rather than the adaptive token.
+    static let cyan = Color(nsColor: NSColor(hex: 0x00BFCF))
+
     @ObservedObject var model: OverlayModel
 
     var body: some View {
@@ -18,7 +22,7 @@ struct OverlayView: View {
             case .recording:
                 if model.micReady {
                     Image(systemName: "mic.fill")
-                        .foregroundStyle(.red)
+                        .foregroundStyle(OverlayView.cyan)
                     LevelWaveform(level: model.level)
                 } else {
                     ProgressView()
@@ -40,6 +44,7 @@ struct OverlayView: View {
                 EmptyView()
             }
         }
+        .tint(OverlayView.cyan)
         .font(.echo(13, .medium))
         .foregroundStyle(.white)
         .padding(.horizontal, 18)
@@ -60,7 +65,7 @@ private struct LevelWaveform: View {
         HStack(spacing: 2.5) {
             ForEach(history.indices, id: \.self) { index in
                 Capsule()
-                    .fill(.white.opacity(0.9))
+                    .fill(OverlayView.cyan.opacity(0.9))
                     .frame(width: 2.5, height: 3 + CGFloat(history[index]) * 15)
             }
         }

@@ -39,13 +39,7 @@ struct TranscriptRow: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(
-                    LinearGradient(
-                        colors: [.echoEdgeTop, .echoEdgeBottom],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
+                .strokeBorder(Color.echoHairline)
         )
         .onHover { hovering in
             withAnimation(Motion.ease) { isHovering = hovering }
@@ -66,6 +60,6 @@ struct TranscriptRow: View {
                 .font(.echo(11, .medium))
         }
         .buttonStyle(.plain)
-        .foregroundStyle(justCopied ? Color.green : Color.echoSecondary)
+        .foregroundStyle(justCopied ? Color.echoAccent : Color.echoSecondary)
     }
 }

@@ -53,6 +53,7 @@ struct MainWindowView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .background(Color.echoBase)
+        .tint(Color.echoAccent)
         .frame(minWidth: 720, minHeight: 560)
     }
 
@@ -61,7 +62,7 @@ struct MainWindowView: View {
             HStack(spacing: 8) {
                 Image(systemName: "waveform")
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(Color.echoCoral)
+                    .foregroundStyle(Color.echoAccent)
                 Text("Echo")
                     .font(.echoDisplay(16))
                     .tracking(-0.2)
@@ -111,31 +112,18 @@ struct MainWindowView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [Color.echoCardTop.opacity(0.7), Color.echoCard.opacity(0.6)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
+                .fill(Color.echoCard.opacity(0.7))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(
-                    LinearGradient(
-                        colors: [.echoEdgeTop, .echoEdgeBottom],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
+                .strokeBorder(Color.echoHairline)
         )
     }
 
     private var statusColor: Color {
         switch controller.state {
-        case .idle: return .green
-        case .recording, .transcribing: return .echoCoral
-        case .error, .needsPermissions: return .yellow
+        case .idle, .recording, .transcribing: return .echoAccent
+        case .error, .needsPermissions: return .echoWarning
         default: return .echoSecondary
         }
     }
@@ -170,13 +158,13 @@ private struct SidebarRow: View {
         Button(action: action) {
             HStack(spacing: 9) {
                 Capsule()
-                    .fill(Color.echoCoral)
+                    .fill(Color.echoAccent)
                     .frame(width: 3, height: 16)
                     .opacity(isSelected ? 1 : 0)
                 Image(systemName: section.symbol)
                     .font(.system(size: 13, weight: .medium))
                     .frame(width: 18)
-                    .foregroundStyle(isSelected ? Color.echoCoral : Color.echoSecondary)
+                    .foregroundStyle(isSelected ? Color.echoAccent : Color.echoSecondary)
                 Text(section.title)
                     .font(.echo(13, isSelected ? .semibold : .regular))
                     .foregroundStyle(isSelected ? Color.echoText : Color.echoSecondary)
