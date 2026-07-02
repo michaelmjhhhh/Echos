@@ -76,6 +76,18 @@ final class DictationController: ObservableObject {
             .store(in: &cancellables)
 
         let isHostingTests = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+        #if DEBUG
+        // Temporary diagnostic: exercise the insertion-target check on a timer
+        // so the decision can be observed via `log show` without dictating.
+        if autostart && !isHostingTests && ProcessInfo.processInfo.environment["ECHO_PROBE_TARGET"] != nil {
+            Task { [inserter] in
+                while !Task.isCancelled {
+                    _ = inserter.hasInsertionTarget
+                    try? await Task.sleep(for: .seconds(2))
+                }
+            }
+        }
+        #endif
         if autostart && !isHostingTests {
             let overlay = OverlayController()
             self.overlay = overlay

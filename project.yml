@@ -32,8 +32,8 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.michael.echo
-        CODE_SIGN_STYLE: Automatic
-        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "58CFF4AB255CBC0E7972D18C3AC0739DFCD3B9F9"
         ENABLE_HARDENED_RUNTIME: NO
         ENABLE_APP_SANDBOX: NO
         SWIFT_VERSION: "5.9"
@@ -50,7 +50,7 @@ targets:
       - target: Echo
     settings:
       base:
-        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_IDENTITY: "58CFF4AB255CBC0E7972D18C3AC0739DFCD3B9F9"
         GENERATE_INFOPLIST_FILE: YES
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Echo.app/Contents/MacOS/Echo"
         BUNDLE_LOADER: "$(TEST_HOST)"

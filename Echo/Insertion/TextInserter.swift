@@ -1,6 +1,7 @@
 import AppKit
 import ApplicationServices
 import Carbon.HIToolbox
+import os
 
 enum InsertionResult: Equatable {
     case pasted
@@ -65,6 +66,24 @@ final class TextInserter: TextInserting {
     /// frontmost app to service the paste event.
     private let restoreDelay: TimeInterval = 0.7
 
+    private static let log = Logger(subsystem: "com.michael.echo", category: "insertion")
+
+    /// Diagnostic sink: also append decisions to a file when the probe env
+    /// var is set, since `log show` can be unreliable for ad-hoc-signed apps.
+    private static func trace(_ line: String) {
+        log.log("\(line, privacy: .public)")
+        guard ProcessInfo.processInfo.environment["ECHO_PROBE_TARGET"] != nil else { return }
+        let url = URL(fileURLWithPath: "/tmp/echo_target_probe.log")
+        let stamped = "\(Date().formatted(date: .omitted, time: .standard)) \(line)\n"
+        if let handle = try? FileHandle(forWritingTo: url) {
+            handle.seekToEndOfFile()
+            handle.write(Data(stamped.utf8))
+            try? handle.close()
+        } else {
+            try? stamped.write(to: url, atomically: true, encoding: .utf8)
+        }
+    }
+
     var hasInsertionTarget: Bool {
         let secureInput = IsSecureEventInputEnabled()
 
@@ -78,31 +97,40 @@ final class TextInserter: TextInserting {
 
         guard error == .success, let focusedRef,
               CFGetTypeID(focusedRef) == AXUIElementGetTypeID() else {
-            return InsertionTargetHeuristic.hasTarget(
+            let decision = InsertionTargetHeuristic.hasTarget(
                 secureInput: secureInput,
                 focusedElementExists: false,
                 role: nil,
                 valueSettable: false,
                 selectedTextRangeSettable: false
             )
+            Self.trace("target check: no focused element (ax error \(error.rawValue)) secure=\(secureInput) -> \(decision ? "paste" : "copy pill")")
+            return decision
         }
         let element = focusedRef as! AXUIElement
 
         var roleRef: CFTypeRef?
         AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleRef)
+        var subroleRef: CFTypeRef?
+        AXUIElementCopyAttributeValue(element, kAXSubroleAttribute as CFString, &subroleRef)
 
         var valueSettable = DarwinBoolean(false)
         _ = AXUIElementIsAttributeSettable(element, kAXValueAttribute as CFString, &valueSettable)
         var rangeSettable = DarwinBoolean(false)
         _ = AXUIElementIsAttributeSettable(element, kAXSelectedTextRangeAttribute as CFString, &rangeSettable)
 
-        return InsertionTargetHeuristic.hasTarget(
+        let decision = InsertionTargetHeuristic.hasTarget(
             secureInput: secureInput,
             focusedElementExists: true,
             role: roleRef as? String,
             valueSettable: valueSettable.boolValue,
             selectedTextRangeSettable: rangeSettable.boolValue
         )
+        var pid: pid_t = 0
+        AXUIElementGetPid(element, &pid)
+        let appName = NSRunningApplication(processIdentifier: pid)?.localizedName ?? "?"
+        Self.trace("target check: app=\(appName) role=\(roleRef as? String ?? "nil") subrole=\(subroleRef as? String ?? "nil") valueSettable=\(valueSettable.boolValue) rangeSettable=\(rangeSettable.boolValue) secure=\(secureInput) -> \(decision ? "paste" : "copy pill")")
+        return decision
     }
 
     func copyToClipboard(_ text: String) {
