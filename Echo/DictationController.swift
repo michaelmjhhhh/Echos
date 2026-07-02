@@ -16,6 +16,7 @@ final class DictationController: ObservableObject {
     private let transcriber: Transcribing
     private let inserter: TextInserting
     private let processors: [TextProcessor]
+    private let transcripts: TranscriptStore?
     private var hotkeyMonitor: HotkeyMonitoring
     private var overlay: OverlayController?
     private var maxDurationTask: Task<Void, Never>?
@@ -39,8 +40,10 @@ final class DictationController: ObservableObject {
         inserter: TextInserting = TextInserter(),
         processors: [TextProcessor] = [WhitespaceCleanupProcessor()],
         hotkeyMonitor: HotkeyMonitoring? = nil,
+        transcripts: TranscriptStore? = nil,
         autostart: Bool = true
     ) {
+        self.transcripts = transcripts
         self.settings = settings
         self.recorder = recorder
         self.transcriber = transcriber ?? TranscriptionService(modelVariant: settings.modelVariant)
@@ -196,6 +199,9 @@ final class DictationController: ObservableObject {
                     return
                 }
                 self.lastTranscript = text
+                if self.settings.saveHistory {
+                    self.transcripts?.add(text)
+                }
                 let result = self.inserter.insert(text)
                 if result == .copiedToClipboard {
                     self.state = .error("Paste blocked — transcript is on your clipboard")

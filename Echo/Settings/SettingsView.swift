@@ -1,53 +1,98 @@
 import SwiftUI
 
+/// The Settings section of the main window (no longer a separate Settings scene).
 struct SettingsView: View {
     @EnvironmentObject private var settings: SettingsStore
     @State private var inputDevices: [AudioInputDevice] = []
 
     var body: some View {
-        Form {
-            Section {
-                Picker("Microphone", selection: $settings.inputDeviceUID) {
-                    Text("System Default").tag(String?.none)
-                    ForEach(inputDevices) { device in
-                        Text(device.name).tag(String?.some(device.uid))
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                settingsCard(eyebrow: "Input") {
+                    labeledRow("Microphone") {
+                        Picker("", selection: $settings.inputDeviceUID) {
+                            Text("System Default").tag(String?.none)
+                            ForEach(inputDevices) { device in
+                                Text(device.name).tag(String?.some(device.uid))
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(width: 220)
                     }
-                }
-                Text("“System Default” follows whatever macOS is currently using — pick a specific device if a Bluetooth mic (e.g. AirPods) misbehaves.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
-
-            Section {
-                Picker("Dictation key", selection: $settings.hotkey) {
-                    ForEach(Hotkey.allCases) { hotkey in
-                        Text(hotkey.label).tag(hotkey)
+                    hairline
+                    labeledRow("Dictation key") {
+                        Picker("", selection: $settings.hotkey) {
+                            ForEach(Hotkey.allCases) { hotkey in
+                                Text(hotkey.label).tag(hotkey)
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(width: 220)
                     }
+                    if let caveat = settings.hotkey.caveat {
+                        footnote(caveat)
+                    }
+                    footnote("Hold the key while speaking; release to insert the transcript at your cursor.")
                 }
-                if let caveat = settings.hotkey.caveat {
-                    Text(caveat)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
+
+                settingsCard(eyebrow: "Behavior") {
+                    labeledRow("Start Echo at login") {
+                        Toggle("", isOn: $settings.launchAtLogin)
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .controlSize(.small)
+                    }
+                    hairline
+                    labeledRow("Save dictation history") {
+                        Toggle("", isOn: $settings.saveHistory)
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .controlSize(.small)
+                    }
+                    footnote("History is stored only on this Mac — nothing ever leaves it.")
                 }
-                Text("Hold the key while speaking; release to insert the transcript at your cursor.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
 
-            Section {
-                Toggle("Start Echo at login", isOn: $settings.launchAtLogin)
+                settingsCard(eyebrow: "Model") {
+                    labeledRow("Speech model") {
+                        Text(settings.modelVariant)
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundStyle(Color.echoSecondary)
+                    }
+                    footnote("English-optimized Whisper, runs fully on-device. To try another variant: defaults write com.michael.echo modelVariant <name>, then relaunch Echo.")
+                }
             }
-
-            Section {
-                LabeledContent("Model", value: settings.modelVariant)
-                Text("English-optimized Whisper model, runs fully on-device. Restart Echo after changing the model via `defaults write com.michael.echo modelVariant <name>`.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
+            .padding(24)
         }
-        .formStyle(.grouped)
-        .frame(width: 440)
-        .fixedSize()
         .onAppear { inputDevices = AudioInputDevices.all() }
+    }
+
+    private func settingsCard(eyebrow: String, @ViewBuilder content: () -> some View) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            EyebrowText(text: eyebrow)
+            content()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .echoCard()
+    }
+
+    private func labeledRow(_ label: String, @ViewBuilder control: () -> some View) -> some View {
+        HStack {
+            Text(label)
+                .font(.system(size: 13))
+                .foregroundStyle(Color.echoText)
+            Spacer()
+            control()
+        }
+    }
+
+    private var hairline: some View {
+        Rectangle().fill(Color.echoHairline).frame(height: 1)
+    }
+
+    private func footnote(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 11))
+            .foregroundStyle(Color.echoSecondary)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }

@@ -19,6 +19,10 @@ final class SettingsStore: ObservableObject {
     @Published var inputDeviceUID: String? {
         didSet { defaults.set(inputDeviceUID, forKey: Keys.inputDeviceUID) }
     }
+    /// Keep a local history of dictated transcripts (never leaves the Mac).
+    @Published var saveHistory: Bool {
+        didSet { defaults.set(saveHistory, forKey: Keys.saveHistory) }
+    }
     @Published var launchAtLogin: Bool {
         didSet { updateLaunchAtLogin() }
     }
@@ -29,6 +33,7 @@ final class SettingsStore: ObservableObject {
         static let hotkey = "hotkey"
         static let modelVariant = "modelVariant"
         static let inputDeviceUID = "inputDeviceUID"
+        static let saveHistory = "saveHistory"
     }
 
     init(defaults: UserDefaults = .standard) {
@@ -36,6 +41,7 @@ final class SettingsStore: ObservableObject {
         self.hotkey = defaults.string(forKey: Keys.hotkey).flatMap(Hotkey.init(rawValue:)) ?? .rightOption
         self.modelVariant = defaults.string(forKey: Keys.modelVariant) ?? Self.defaultModelVariant
         self.inputDeviceUID = defaults.string(forKey: Keys.inputDeviceUID)
+        self.saveHistory = defaults.object(forKey: Keys.saveHistory) as? Bool ?? true
         self.launchAtLogin = SMAppService.mainApp.status == .enabled
     }
 
