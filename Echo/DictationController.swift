@@ -19,6 +19,8 @@ final class DictationController: ObservableObject {
     private var hotkeyMonitor: HotkeyMonitoring
     private var overlay: OverlayController?
     private var maxDurationTask: Task<Void, Never>?
+    private var micWakeTask: Task<Void, Never>?
+    private let linkWaker = AudioLinkWaker()
     private var recordingStartedAt: Date?
     private var cancellables: Set<AnyCancellable> = []
 
@@ -134,6 +136,15 @@ final class DictationController: ObservableObject {
         }
         recordingStartedAt = Date()
         state = .recording
+        // If the mic hasn't produced audio shortly after starting, nudge the
+        // output side — a dormant Bluetooth link often needs outbound audio
+        // before it will bring the microphone up at all.
+        micWakeTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(600))
+            guard !Task.isCancelled, let self,
+                  case .recording = self.state, !self.micReady else { return }
+            self.linkWaker.wake()
+        }
         maxDurationTask = Task { [weak self, maxRecordingSeconds] in
             try? await Task.sleep(for: .seconds(maxRecordingSeconds))
             guard !Task.isCancelled else { return }
@@ -149,6 +160,8 @@ final class DictationController: ObservableObject {
     private func finishRecording() {
         maxDurationTask?.cancel()
         maxDurationTask = nil
+        micWakeTask?.cancel()
+        micWakeTask = nil
         let samples = recorder.stop()
         let heldFor = recordingStartedAt.map { Date().timeIntervalSince($0) } ?? 0
         recordingStartedAt = nil
