@@ -191,6 +191,66 @@ final class DictationControllerTests: XCTestCase {
         controller.hotkeyReleased()
         XCTAssertEqual(controller.state, .idle)
     }
+
+    // MARK: - Dictionary integration
+
+    private func makeControllerWithDictionary() -> (DictationController, DictionaryStore) {
+        recorder = MockRecorder()
+        transcriber = MockTranscriber()
+        inserter = MockInserter()
+        let suite = "EchoTests-\(UUID().uuidString)"
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(suite, isDirectory: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let dictionary = DictionaryStore(directory: directory, defaults: UserDefaults(suiteName: suite)!)
+        let controller = DictationController(
+            settings: SettingsStore(defaults: UserDefaults(suiteName: suite + "-settings")!),
+            recorder: recorder,
+            transcriber: transcriber,
+            inserter: inserter,
+            hotkeyMonitor: MockHotkeyMonitor(),
+            dictionary: dictionary,
+            autostart: false
+        )
+        return (controller, dictionary)
+    }
+
+    func testDictionaryVocabularyReachesTranscriber() async {
+        let (controller, dictionary) = makeControllerWithDictionary()
+        dictionary.add(word: "Kubernetes")
+        dictionary.add(word: "Erik", starred: true)
+        controller.activateForTesting()
+        recorder.samplesToReturn = [Float](repeating: 0, count: 16_000)
+        transcriber.result = .success("hello")
+        controller.hotkeyPressed()
+        controller.hotkeyReleased()
+        await controller.transcriptionTask?.value
+        XCTAssertEqual(transcriber.receivedVocabulary, ["Erik", "Kubernetes"]) // starred first
+    }
+
+    func testDictionaryReplacementAppliesToInsertedText() async {
+        let (controller, dictionary) = makeControllerWithDictionary()
+        dictionary.add(word: "Kubernetes", misspelling: "cooper netties")
+        controller.activateForTesting()
+        recorder.samplesToReturn = [Float](repeating: 0, count: 16_000)
+        transcriber.result = .success("deploy to cooper netties now")
+        controller.hotkeyPressed()
+        controller.hotkeyReleased()
+        await controller.transcriptionTask?.value
+        XCTAssertEqual(inserter.insertedText, "deploy to Kubernetes now")
+        XCTAssertEqual(controller.lastTranscript, "deploy to Kubernetes now")
+    }
+
+    func testEmptyDictionarySendsNoVocabulary() async {
+        let (controller, _) = makeControllerWithDictionary()
+        controller.activateForTesting()
+        recorder.samplesToReturn = [Float](repeating: 0, count: 16_000)
+        transcriber.result = .success("hello")
+        controller.hotkeyPressed()
+        controller.hotkeyReleased()
+        await controller.transcriptionTask?.value
+        XCTAssertEqual(transcriber.receivedVocabulary, [])
+    }
 }
 
 // MARK: - Mocks
@@ -215,12 +275,14 @@ private final class MockRecorder: AudioRecording {
 
 private final class MockTranscriber: Transcribing {
     var result: Result<String, Error> = .success("")
+    var receivedVocabulary: [String]?
 
     func prepare(progress: @escaping (Double) -> Void) async throws {}
     func loadModel() async throws {}
 
-    func transcribe(_ samples: [Float]) async throws -> String {
-        try result.get()
+    func transcribe(_ samples: [Float], vocabulary: [String]) async throws -> String {
+        receivedVocabulary = vocabulary
+        return try result.get()
     }
 }
 
