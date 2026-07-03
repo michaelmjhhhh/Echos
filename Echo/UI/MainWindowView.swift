@@ -25,6 +25,25 @@ enum MainSection: String, CaseIterable, Identifiable {
         case .settings: return "gearshape"
         }
     }
+
+    /// ⌘1…⌘4, in sidebar order.
+    var shortcutKey: KeyEquivalent {
+        switch self {
+        case .home: return "1"
+        case .insights: return "2"
+        case .history: return "3"
+        case .settings: return "4"
+        }
+    }
+
+    var shortcutHint: String {
+        switch self {
+        case .home: return "⌘1"
+        case .insights: return "⌘2"
+        case .history: return "⌘3"
+        case .settings: return "⌘4"
+        }
+    }
 }
 
 struct MainWindowView: View {
@@ -37,7 +56,7 @@ struct MainWindowView: View {
     var body: some View {
         HStack(spacing: 0) {
             sidebar
-                .frame(width: 210)
+                .frame(width: EchoLayout.sidebarWidth)
                 .background(.ultraThinMaterial)
 
             Rectangle()
@@ -53,28 +72,46 @@ struct MainWindowView: View {
                 }
             }
             .id(section)
-            .transition(.opacity.combined(with: .offset(y: 6)))
+            .transition(.asymmetric(
+                insertion: .opacity.combined(with: .offset(y: 6)).animation(Motion.spring),
+                removal: .opacity.animation(Motion.exit)
+            ))
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .background(Color.echoBase)
+        .background(sectionShortcuts)
         .tint(Color.echoAccent)
         .frame(minWidth: 720, minHeight: 560)
     }
 
+    /// Hidden ⌘1…⌘4 buttons — keyboard-first navigation without visible chrome.
+    private var sectionShortcuts: some View {
+        ForEach(MainSection.allCases) { item in
+            Button(item.title) {
+                withAnimation(reduceMotion ? nil : Motion.spring) { section = item }
+            }
+            .keyboardShortcut(item.shortcutKey, modifiers: .command)
+        }
+        .opacity(0)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
     private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: Spacing.xxs) {
+            HStack(spacing: Spacing.xs) {
                 Image(systemName: "waveform")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(size: IconSize.title, weight: .semibold))
                     .foregroundStyle(Color.echoAccent)
+                    .accessibilityHidden(true)
                 Text("Echo")
                     .font(.echoDisplay(16))
                     .tracking(-0.2)
                     .foregroundStyle(Color.echoText)
             }
-            .padding(.horizontal, 12)
+            .padding(.horizontal, Spacing.s)
             .padding(.top, 20)
-            .padding(.bottom, 16)
+            .padding(.bottom, Spacing.m)
 
             ForEach(MainSection.allCases) { item in
                 SidebarRow(section: item, isSelected: section == item) {
@@ -87,12 +124,12 @@ struct MainWindowView: View {
             sidebarFooter
         }
         .padding(.horizontal, 10)
-        .padding(.bottom, 12)
+        .padding(.bottom, Spacing.s)
     }
 
     /// Always-visible health readout — answers "is Echo even running?" from any screen.
     private var sidebarFooter: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
             HStack(spacing: 7) {
                 Circle()
                     .fill(statusColor)
@@ -104,7 +141,7 @@ struct MainWindowView: View {
             }
             HStack(spacing: 7) {
                 Image(systemName: "mic")
-                    .font(.system(size: 9))
+                    .font(.system(size: IconSize.caption))
                     .foregroundStyle(Color.echoSecondary)
                 Text(microphoneName)
                     .font(.echo(11))
@@ -112,16 +149,19 @@ struct MainWindowView: View {
                     .lineLimit(1)
             }
         }
-        .padding(12)
+        .padding(Spacing.s)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
+            RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
                 .fill(Color.echoCard.opacity(0.7))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
+            RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
                 .strokeBorder(Color.echoHairline)
         )
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Echo status")
+        .accessibilityValue("\(shortStatus), microphone \(microphoneName)")
     }
 
     private var statusColor: Color {
@@ -167,7 +207,7 @@ private struct SidebarRow: View {
                     .frame(width: 3, height: 16)
                     .opacity(isSelected ? 1 : 0)
                 Image(systemName: section.symbol)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: IconSize.body, weight: .medium))
                     .frame(width: 18)
                     .foregroundStyle(isSelected ? Color.echoAccent : Color.echoSecondary)
                 Text(section.title)
@@ -179,12 +219,15 @@ private struct SidebarRow: View {
             .padding(.trailing, 10)
             .padding(.vertical, 7)
             .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                RoundedRectangle(cornerRadius: Radius.control, style: .continuous)
                     .fill(isSelected ? Color.echoCardHover : (isHovering ? Color.echoCard.opacity(0.6) : .clear))
             )
-            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: Radius.control, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(EchoPressButtonStyle())
+        .help("\(section.title) (\(section.shortcutHint))")
+        .accessibilityLabel(section.title)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
         .onHover { hovering in
             withAnimation(Motion.ease) { isHovering = hovering }
         }

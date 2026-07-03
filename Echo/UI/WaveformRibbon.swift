@@ -28,12 +28,14 @@ struct WaveformRibbon: View {
             }
             .frame(maxWidth: .infinity)
         }
-        .frame(height: 88)
+        .frame(height: EchoLayout.waveformHeight)
         .onChange(of: level) { _, newLevel in
             history.removeFirst()
             history.append(min(1, max(0, newLevel)))
         }
-        .animation(reduceMotion ? nil : .linear(duration: 0.1), value: history)
+        .animation(reduceMotion ? nil : Motion.waveform, value: history)
+        // Decorative — the hero status text right below narrates state.
+        .accessibilityHidden(true)
     }
 
     @ViewBuilder

@@ -6,7 +6,7 @@ import SwiftUI
 /// and never steals focus from the app being dictated into.
 @MainActor
 final class OverlayController {
-    static let panelSize = NSSize(width: 320, height: 56)
+    static let panelSize = NSSize(width: EchoLayout.overlaySize.width, height: EchoLayout.overlaySize.height)
 
     private let model = OverlayModel()
     private lazy var panel: NSPanel = makePanel()
@@ -51,11 +51,17 @@ final class OverlayController {
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = false
+        panel.animationBehavior = .utilityWindow
         panel.ignoresMouseEvents = true
         panel.hidesOnDeactivate = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.contentView = NSHostingView(rootView: OverlayView(model: model))
         return panel
+    }
+
+    /// Honors the system Reduce Motion setting — fades become instant.
+    private var reduceMotion: Bool {
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
     }
 
     private func show() {
@@ -65,7 +71,7 @@ final class OverlayController {
         panel.alphaValue = 0
         panel.orderFrontRegardless()
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.15
+            context.duration = reduceMotion ? 0 : Motion.overlayFadeIn
             panel.animator().alphaValue = 1
         }
     }
@@ -73,8 +79,8 @@ final class OverlayController {
     private func hide() {
         guard isVisible else { return }
         isVisible = false
-        NSAnimationContext.runAnimationGroup({ context in
-            context.duration = 0.25
+        NSAnimationContext.runAnimationGroup({ [reduceMotion] context in
+            context.duration = reduceMotion ? 0 : Motion.overlayFadeOut
             panel.animator().alphaValue = 0
         }, completionHandler: { [weak self] in
             guard let self, !self.isVisible else { return }

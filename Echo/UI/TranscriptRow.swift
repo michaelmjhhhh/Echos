@@ -9,9 +9,10 @@ struct TranscriptRow: View {
 
     @State private var isHovering = false
     @State private var justCopied = false
+    @FocusState private var copyFocused: Bool
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .top, spacing: Spacing.s) {
             VStack(alignment: .leading, spacing: 6) {
                 Text(entry.text)
                     .font(.echo(13))
@@ -19,7 +20,7 @@ struct TranscriptRow: View {
                     .lineLimit(compact ? 2 : 3)
                     .multilineTextAlignment(.leading)
                     .textSelection(.enabled)
-                HStack(spacing: 8) {
+                HStack(spacing: Spacing.xs) {
                     Text(entry.date.formatted(.relative(presentation: .named)))
                     Text("·")
                     Text("\(entry.wordCount) words")
@@ -28,38 +29,52 @@ struct TranscriptRow: View {
                 .foregroundStyle(Color.echoSecondary)
             }
             Spacer(minLength: 0)
-            if isHovering || justCopied {
-                copyButton
-            }
+            // Visible on hover, when keyboard focus lands on it, and while
+            // confirming — never hidden from keyboard users.
+            copyButton
+                .opacity(isHovering || justCopied || copyFocused ? 1 : 0)
         }
-        .padding(12)
+        .padding(Spacing.s)
         .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
+            RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
                 .fill(isHovering ? Color.echoCardHover : Color.echoCard)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
+            RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
                 .strokeBorder(Color.echoHairline)
         )
         .onHover { hovering in
             withAnimation(Motion.ease) { isHovering = hovering }
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(entry.text)
+        .accessibilityValue("\(entry.date.formatted(.relative(presentation: .named))), \(entry.wordCount) words")
+        .accessibilityAction(named: "Copy") { copy() }
     }
 
     private var copyButton: some View {
         Button {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(entry.text, forType: .string)
-            justCopied = true
-            Task {
-                try? await Task.sleep(for: .seconds(1.5))
-                justCopied = false
-            }
+            copy()
         } label: {
             Label(justCopied ? "Copied" : "Copy", systemImage: justCopied ? "checkmark" : "doc.on.doc")
                 .font(.echo(11, .medium))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(EchoPressButtonStyle())
+        .focusable()
+        .focused($copyFocused)
+        .echoFocusRing(copyFocused, radius: Radius.keycap)
         .foregroundStyle(justCopied ? Color.echoAccent : Color.echoSecondary)
+        .accessibilityLabel("Copy transcript")
+        .help("Copy transcript to the clipboard")
+    }
+
+    private func copy() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(entry.text, forType: .string)
+        withAnimation(Motion.ease) { justCopied = true }
+        Task {
+            try? await Task.sleep(for: .seconds(1.5))
+            withAnimation(Motion.ease) { justCopied = false }
+        }
     }
 }

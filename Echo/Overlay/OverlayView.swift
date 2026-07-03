@@ -10,78 +10,106 @@ final class OverlayModel: ObservableObject {
 }
 
 /// The floating pill shown near the bottom of the screen while dictating —
-/// visual feedback that replaces the start/stop sounds.
+/// visual feedback that replaces the start/stop sounds. Always dark regardless
+/// of app appearance, so it draws exclusively from the fixed `echoOverlay*` /
+/// `*Fixed` tokens. The pill renders only its own dictation state — no other
+/// warnings or notices ever appear mid-recording. Carries the app's single
+/// sanctioned shadow (HUD elevation).
 struct OverlayView: View {
-    /// The pill is always dark regardless of app appearance, so it uses the
-    /// fixed dark-mode accent rather than the adaptive token.
-    static let cyan = Color(nsColor: NSColor(hex: 0x00BFCF))
-
     @ObservedObject var model: OverlayModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Drives the entrance spring: the pill content rises 6pt as the panel
+    /// fades in, then settles.
+    @State private var entered = false
+
+    private var isVisibleState: Bool {
+        switch model.state {
+        case .recording, .transcribing, .copyReady, .error: return true
+        default: return false
+        }
+    }
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: Spacing.s - 2) {
             switch model.state {
             case .recording:
                 if model.micReady {
                     Image(systemName: "mic.fill")
-                        .foregroundStyle(OverlayView.cyan)
+                        .foregroundStyle(Color.echoAccentFixed)
+                        .accessibilityHidden(true)
                     LevelWaveform(level: model.level)
                 } else {
                     ProgressView()
                         .controlSize(.small)
-                        .colorScheme(.dark)
+                        .accessibilityHidden(true)
                     Text("Starting mic…")
                 }
             case .transcribing:
                 ProgressView()
                     .controlSize(.small)
-                    .colorScheme(.dark)
+                    .accessibilityHidden(true)
                 Text("Transcribing…")
             case .copyReady(let transcript):
                 if model.copyConfirmed {
                     Image(systemName: "checkmark")
-                        .foregroundStyle(OverlayView.cyan)
+                        .foregroundStyle(Color.echoAccentFixed)
+                        .accessibilityHidden(true)
                     Text("Copied")
                 } else {
                     Text(transcript)
                         .lineLimit(1)
                         .truncationMode(.tail)
                         .frame(maxWidth: 170, alignment: .leading)
-                        .foregroundStyle(.white.opacity(0.85))
-                    Button {
+                        .foregroundStyle(Color.echoOverlayTextDim)
+                    Button("Copy") {
                         model.onCopy?()
-                    } label: {
-                        Text("Copy")
-                            .font(.echo(12, .semibold))
-                            .foregroundStyle(Color(nsColor: NSColor(hex: 0x1C1C1E)))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 4)
-                            .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(OverlayView.cyan))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(EchoPrimaryButtonStyle(fixed: true))
+                    .accessibilityLabel("Copy transcript")
                 }
             case .error(let message):
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.yellow)
+                    .foregroundStyle(Color.echoWarningFixed)
+                    .accessibilityHidden(true)
                 Text(message)
                     .lineLimit(1)
             default:
                 EmptyView()
             }
         }
-        .tint(OverlayView.cyan)
+        .tint(Color.echoAccentFixed)
         .font(.echo(13, .medium))
-        .foregroundStyle(.white)
+        .foregroundStyle(Color.echoOverlayText)
         .padding(.horizontal, 18)
         .frame(height: 38)
-        .background(Capsule().fill(Color.black.opacity(0.88)))
-        .overlay(Capsule().strokeBorder(Color.white.opacity(0.12)))
+        .background(Capsule().fill(Color.echoOverlayBackground))
+        .overlay(Capsule().strokeBorder(Color.echoOverlayHairline))
         .shadow(color: .black.opacity(0.35), radius: 10, y: 3)
-        .frame(width: OverlayController.panelSize.width, height: OverlayController.panelSize.height)
+        .offset(y: entered ? 0 : 6)
+        .opacity(entered ? 1 : 0)
+        .animation(reduceMotion ? nil : Motion.spring, value: model.state)
+        .animation(reduceMotion ? nil : Motion.spring, value: model.copyConfirmed)
+        .frame(width: EchoLayout.overlaySize.width, height: EchoLayout.overlaySize.height)
+        .environment(\.colorScheme, .dark)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Echo dictation")
+        .onChange(of: isVisibleState) { _, visible in
+            if visible {
+                if reduceMotion {
+                    entered = true
+                } else {
+                    withAnimation(Motion.spring) { entered = true }
+                }
+            } else {
+                entered = false
+            }
+        }
     }
 }
 
 /// A small scrolling bar waveform driven by the live microphone level.
+/// Decorative — hidden from assistive tech; the pill's text narrates state.
 private struct LevelWaveform: View {
     var level: Float
     @State private var history: [Float] = Array(repeating: 0, count: 16)
@@ -90,11 +118,12 @@ private struct LevelWaveform: View {
         HStack(spacing: 2.5) {
             ForEach(history.indices, id: \.self) { index in
                 Capsule()
-                    .fill(OverlayView.cyan.opacity(0.9))
+                    .fill(Color.echoAccentFixed.opacity(0.9))
                     .frame(width: 2.5, height: 3 + CGFloat(history[index]) * 15)
             }
         }
-        .animation(.linear(duration: 0.08), value: history)
+        .animation(Motion.waveform, value: history)
+        .accessibilityHidden(true)
         .onChange(of: level) { _, newLevel in
             history.removeFirst()
             history.append(min(1, max(0, newLevel)))
