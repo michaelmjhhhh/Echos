@@ -10,31 +10,32 @@ struct HomeView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: Spacing.l) {
                 if case .needsPermissions(let mic, let ax) = controller.state {
                     PermissionsBanner(microphone: mic, accessibility: ax)
                 }
 
                 hero
+                    .echoStagger(0, reduceMotion: reduceMotion)
 
-                HStack(spacing: 16) {
+                HStack(spacing: Spacing.m) {
                     infoCard(eyebrow: "Microphone", value: microphoneName)
                     infoCard(eyebrow: "Model", value: modelDisplayName)
                     todayCard
                 }
+                .echoStagger(1, reduceMotion: reduceMotion)
 
                 recentSection
+                    .echoStagger(2, reduceMotion: reduceMotion)
             }
-            .frame(maxWidth: 640)
-            .frame(maxWidth: .infinity)
-            .padding(24)
+            .echoContentColumn()
         }
     }
 
     // MARK: - Hero
 
     private var hero: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: Spacing.m) {
             WaveformRibbon(level: controller.audioLevel, isLive: isLive)
 
             Text(heroStatus)
@@ -51,11 +52,11 @@ struct HomeView: View {
                     .foregroundStyle(Color.echoSecondary)
             }
             .font(.echo(12))
-            .padding(.top, 8)
+            .padding(.top, Spacing.xs)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 32)
-        .echoCard(padding: 24)
+        .padding(.vertical, Spacing.xl)
+        .echoCard(padding: Spacing.l)
         .animation(reduceMotion ? nil : Motion.spring, value: controller.state)
     }
 
@@ -90,7 +91,7 @@ struct HomeView: View {
     }
 
     private func infoCard(eyebrow: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
             EyebrowText(text: eyebrow)
             Text(value)
                 .font(.echo(15, .medium))
@@ -102,12 +103,14 @@ struct HomeView: View {
     }
 
     private var todayCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
             EyebrowText(text: "Today")
             HStack(alignment: .firstTextBaseline, spacing: 5) {
                 Text("\(transcripts.todayWordCount)")
                     .font(.echoMono(15, medium: true))
                     .foregroundStyle(Color.echoText)
+                    .contentTransition(.numericText())
+                    .animation(reduceMotion ? nil : Motion.spring, value: transcripts.todayWordCount)
                 Text("words · \(transcripts.todayEntries.count) dictations")
                     .font(.echo(12))
                     .foregroundStyle(Color.echoSecondary)
@@ -120,7 +123,7 @@ struct HomeView: View {
     // MARK: - Recent
 
     private var recentSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Spacing.s) {
             HStack {
                 EyebrowText(text: "Recent")
                 Spacer()
@@ -131,30 +134,32 @@ struct HomeView: View {
                         HStack(spacing: 3) {
                             Text("View all")
                             Image(systemName: "arrow.right")
-                                .font(.system(size: 9, weight: .semibold))
+                                .font(.system(size: IconSize.caption, weight: .semibold))
                         }
                         .font(.echo(12, .medium))
                         .foregroundStyle(Color.echoSecondary)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(EchoPressButtonStyle())
+                    .accessibilityLabel("View all transcripts")
+                    .help("Open History (⌘3)")
                 }
             }
 
             if transcripts.entries.isEmpty {
-                HStack(spacing: 6) {
-                    Text("Nothing here yet — hold")
-                    KeycapView(label: settings.hotkey.label)
-                    Text("and your words land here.")
+                EchoEmptyState {
+                    HStack(spacing: 6) {
+                        Text("Nothing here yet — hold")
+                        KeycapView(label: settings.hotkey.label)
+                        Text("and your words land here.")
+                    }
                 }
-                .font(.echo(13))
-                .foregroundStyle(Color.echoSecondary)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 24)
+                .padding(.vertical, Spacing.l)
                 .echoCard()
             } else {
-                VStack(spacing: 8) {
-                    ForEach(transcripts.entries.prefix(3)) { entry in
+                VStack(spacing: Spacing.xs) {
+                    ForEach(Array(transcripts.entries.prefix(3).enumerated()), id: \.element.id) { index, entry in
                         TranscriptRow(entry: entry, compact: true)
+                            .echoStagger(index, reduceMotion: reduceMotion)
                     }
                 }
             }
@@ -167,9 +172,10 @@ private struct PermissionsBanner: View {
     let accessibility: Bool
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: Spacing.s) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(Color.echoWarning)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Echo needs permission to work")
                     .font(.echo(13, .semibold))
@@ -181,9 +187,11 @@ private struct PermissionsBanner: View {
             Spacer()
             if !microphone {
                 Button("Open Microphone Settings") { Permissions.openMicrophoneSettings() }
+                    .buttonStyle(EchoPrimaryButtonStyle())
             }
             if !accessibility {
                 Button("Open Accessibility Settings") { Permissions.openAccessibilitySettings() }
+                    .buttonStyle(EchoPrimaryButtonStyle())
             }
         }
         .echoCard()

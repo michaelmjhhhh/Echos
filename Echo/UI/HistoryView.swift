@@ -4,8 +4,10 @@ import SwiftUI
 struct HistoryView: View {
     @EnvironmentObject private var transcripts: TranscriptStore
     @EnvironmentObject private var settings: SettingsStore
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var query = ""
     @State private var confirmingClear = false
+    @FocusState private var searchFocused: Bool
 
     private var filtered: [TranscriptEntry] {
         guard !query.isEmpty else { return transcripts.entries }
@@ -20,40 +22,72 @@ struct HistoryView: View {
                 emptyState
             } else {
                 ScrollView {
-                    LazyVStack(spacing: 8) {
-                        ForEach(filtered) { entry in
+                    LazyVStack(spacing: Spacing.xs) {
+                        ForEach(Array(filtered.enumerated()), id: \.element.id) { index, entry in
                             TranscriptRow(entry: entry)
+                                .echoStagger(index, reduceMotion: reduceMotion)
                         }
                     }
-                    .padding(.bottom, 16)
+                    .padding(.bottom, Spacing.m)
+                    // Re-key on the query so filtering re-runs the entrance stagger.
+                    .id(query)
                 }
             }
         }
-        .frame(maxWidth: 640)
-        .frame(maxWidth: .infinity)
-        .padding(24)
+        .echoContentColumn()
+        .background(searchShortcut)
+    }
+
+    /// Hidden ⌘F — focuses the search field from anywhere in History.
+    private var searchShortcut: some View {
+        Button("Find") { searchFocused = true }
+            .keyboardShortcut("f", modifiers: .command)
+            .opacity(0)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 
     private var header: some View {
         HStack(spacing: 10) {
             HStack(spacing: 7) {
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 12))
+                    .font(.system(size: IconSize.small))
                     .foregroundStyle(Color.echoSecondary)
+                    .accessibilityHidden(true)
                 TextField("Search transcripts", text: $query)
                     .textFieldStyle(.plain)
                     .font(.echo(13))
                     .foregroundStyle(Color.echoText)
+                    .focused($searchFocused)
+                    .onExitCommand {
+                        // Escape clears the query first, then releases focus.
+                        if query.isEmpty {
+                            searchFocused = false
+                        } else {
+                            query = ""
+                        }
+                    }
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
-            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.echoCard))
-            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Color.echoHairline))
+            .background(RoundedRectangle(cornerRadius: Radius.control, style: .continuous).fill(Color.echoCard))
+            .overlay(RoundedRectangle(cornerRadius: Radius.control, style: .continuous).strokeBorder(Color.echoHairline))
+            .echoFocusRing(searchFocused)
+            .help("Search transcripts (⌘F)")
+
+            if !query.isEmpty {
+                Text(filtered.count == 1 ? "1 match" : "\(filtered.count) matches")
+                    .font(.echoMono(10, medium: true))
+                    .tracking(0.7)
+                    .foregroundStyle(Color.echoSecondary)
+                    .monospacedDigit()
+            }
 
             Spacer()
 
             if !transcripts.entries.isEmpty {
                 Button("Clear History") { confirmingClear = true }
+                    .buttonStyle(EchoSecondaryButtonStyle(destructive: true))
                     .confirmationDialog(
                         "Delete all \(transcripts.entries.count) transcripts?",
                         isPresented: $confirmingClear
@@ -67,33 +101,35 @@ struct HistoryView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 12) {
+        VStack {
             Spacer()
-            Image(systemName: "waveform")
-                .font(.system(size: 28))
-                .foregroundStyle(Color.echoSecondary.opacity(0.6))
             if transcripts.entries.isEmpty {
                 if settings.saveHistory {
-                    HStack(spacing: 6) {
-                        Text("Nothing here yet — hold")
-                        KeycapView(label: settings.hotkey.label)
-                        Text("in any app and your words land here.")
+                    EchoEmptyState {
+                        HStack(spacing: 6) {
+                            Text("Nothing here yet — hold")
+                            KeycapView(label: settings.hotkey.label)
+                            Text("in any app and your words land here.")
+                        }
                     }
-                    .font(.echo(13))
-                    .foregroundStyle(Color.echoSecondary)
                 } else {
-                    Text("History is turned off in Settings.")
-                        .font(.echo(13))
-                        .foregroundStyle(Color.echoSecondary)
+                    EchoEmptyState {
+                        Text("History is turned off in Settings.")
+                    }
                 }
             } else {
-                Text("No transcripts match “\(query)”.")
-                    .font(.echo(13))
-                    .foregroundStyle(Color.echoSecondary)
+                EchoEmptyState(icon: "magnifyingglass") {
+                    Text("No transcripts match “\(query)”.")
+                } actions: {
+                    Button("Clear Search") {
+                        query = ""
+                        searchFocused = true
+                    }
+                    .buttonStyle(EchoSecondaryButtonStyle())
+                }
             }
             Spacer()
         }
         .frame(maxWidth: .infinity)
     }
 }
-

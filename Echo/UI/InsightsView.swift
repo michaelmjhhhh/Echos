@@ -2,6 +2,7 @@ import SwiftUI
 
 struct InsightsView: View {
     @EnvironmentObject private var usage: UsageStore
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let calendar = Calendar.current
 
@@ -38,20 +39,20 @@ struct InsightsView: View {
     var body: some View {
         let snapshot = makeSnapshot()
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack(alignment: .top, spacing: 16) {
+            VStack(alignment: .leading, spacing: Spacing.m) {
+                HStack(alignment: .top, spacing: Spacing.m) {
                     wpmCard(snapshot.wpm)
                     totalWordsCard(snapshot.totals)
                     dictationsCard(snapshot.totals)
                 }
-                HStack(alignment: .top, spacing: 16) {
+                .echoStagger(0, reduceMotion: reduceMotion)
+                HStack(alignment: .top, spacing: Spacing.m) {
                     appUsageCard(snapshot.apps)
                     streakCard(snapshot)
                 }
+                .echoStagger(1, reduceMotion: reduceMotion)
             }
-            .frame(maxWidth: 640)
-            .frame(maxWidth: .infinity)
-            .padding(24)
+            .echoContentColumn()
         }
     }
 
@@ -72,12 +73,15 @@ struct InsightsView: View {
 
     private func wpmCard(_ wpm: Int) -> some View {
         statCard(eyebrow: "Words per minute") {
-            HStack(alignment: .center, spacing: 12) {
-                WPMGauge(value: wpm)
+            HStack(alignment: .center, spacing: Spacing.s) {
+                WPMGauge(value: wpm, reduceMotion: reduceMotion)
                 Text("\(wpm)")
                     .font(.echoDisplay(30))
                     .tracking(-0.6)
                     .foregroundStyle(Color.echoText)
+                    .monospacedDigit()
+                    .contentTransition(.numericText())
+                    .animation(reduceMotion ? nil : Motion.spring, value: wpm)
             }
         }
     }
@@ -89,9 +93,13 @@ struct InsightsView: View {
                     .font(.echoDisplay(30))
                     .tracking(-0.6)
                     .foregroundStyle(Color.echoText)
+                    .monospacedDigit()
+                    .contentTransition(.numericText())
+                    .animation(reduceMotion ? nil : Motion.spring, value: totals.words)
                 HStack(spacing: 4) {
                     Image(systemName: "arrow.up.right")
-                        .font(.system(size: 8, weight: .bold))
+                        .font(.system(size: IconSize.caption, weight: .bold))
+                        .accessibilityHidden(true)
                     Text("\(totals.wordsThisMonth.formatted()) this month")
                         .font(.echoMono(10, medium: true))
                 }
@@ -108,6 +116,9 @@ struct InsightsView: View {
                     .font(.echoDisplay(30))
                     .tracking(-0.6)
                     .foregroundStyle(Color.echoText)
+                    .monospacedDigit()
+                    .contentTransition(.numericText())
+                    .animation(reduceMotion ? nil : Motion.spring, value: totals.dictations)
                 Text(totals.activeDays == 1 ? "1 active day" : "\(totals.activeDays) active days")
                     .font(.echoMono(10))
                     .foregroundStyle(Color.echoSecondary)
@@ -120,14 +131,14 @@ struct InsightsView: View {
     private let detailCardHeight: CGFloat = 200
 
     private func appUsageCard(_ apps: [AppUsage]) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Spacing.s) {
             EyebrowText(text: "App usage")
             if apps.isEmpty {
                 Spacer()
-                Text("Dictate into any app and it shows up here.")
-                    .font(.echo(12))
-                    .foregroundStyle(Color.echoSecondary)
-                    .frame(maxWidth: .infinity, alignment: .center)
+                EchoEmptyState(icon: "app.dashed") {
+                    Text("Dictate into any app and it shows up here.")
+                        .font(.echo(12))
+                }
                 Spacer()
             } else {
                 let maxWords = apps.map(\.words).max() ?? 1
@@ -145,7 +156,8 @@ struct InsightsView: View {
     }
 
     private func streakCard(_ snapshot: Snapshot) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let activeDays = snapshot.daily.values.filter { $0 > 0 }.count
+        return VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
                 Text(snapshot.currentStreak == 1 ? "1 day streak" : "\(snapshot.currentStreak) day streak")
                     .font(.echoDisplay(16))
@@ -156,6 +168,12 @@ struct InsightsView: View {
             }
             Spacer(minLength: 0)
             StreakHeatmap(daily: snapshot.daily)
+                // 126 individual cells are VoiceOver noise — one summary instead.
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Dictation activity calendar")
+                .accessibilityValue(
+                    "\(snapshot.currentStreak) day current streak, longest \(snapshot.longestStreak), active on \(activeDays) recent days"
+                )
             Spacer(minLength: 0)
             HStack(spacing: 5) {
                 Text("LESS")
@@ -170,6 +188,7 @@ struct InsightsView: View {
                     .font(.echoMono(8))
                     .foregroundStyle(Color.echoSecondary)
             }
+            .accessibilityHidden(true)
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .frame(height: detailCardHeight)
@@ -178,23 +197,40 @@ struct InsightsView: View {
 }
 
 /// Half-circle gauge drawn as a real arc path (no clipping tricks).
-/// Scale caps at 200 WPM.
+/// Scale caps at 200 WPM. Sweeps up from zero on first appearance.
 private struct WPMGauge: View {
     let value: Int
+    let reduceMotion: Bool
+
+    @State private var appeared = false
 
     var body: some View {
         ZStack(alignment: .bottom) {
             GaugeArc(fraction: 1)
                 .stroke(Color.echoHairline, style: StrokeStyle(lineWidth: 7, lineCap: .round))
-            GaugeArc(fraction: min(Double(value) / 200, 1))
+            GaugeArc(fraction: appeared ? min(Double(value) / 200, 1) : 0)
                 .stroke(Color.echoAccent, style: StrokeStyle(lineWidth: 7, lineCap: .round))
         }
         .frame(width: 60, height: 34)
+        // Decorative — the number beside it carries the value.
+        .accessibilityHidden(true)
+        .onAppear {
+            if reduceMotion {
+                appeared = true
+            } else {
+                withAnimation(Motion.spring) { appeared = true }
+            }
+        }
     }
 }
 
 private struct GaugeArc: Shape {
     var fraction: Double
+
+    var animatableData: Double {
+        get { fraction }
+        set { fraction = newValue }
+    }
 
     func path(in rect: CGRect) -> Path {
         var path = Path()
@@ -235,6 +271,11 @@ private struct AppUsageBar: View {
                 .foregroundStyle(Color.echoSecondary)
                 .frame(width: 44, alignment: .trailing)
         }
+        // Truncation recovery + exact value, on the whole row.
+        .help("\(app.words.formatted()) words in \(app.name)")
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(app.name)
+        .accessibilityValue("\(app.words.formatted()) words")
     }
 }
 

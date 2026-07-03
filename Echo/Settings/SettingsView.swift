@@ -17,7 +17,7 @@ struct SettingsView: View {
                             }
                         }
                         .labelsHidden()
-                        .frame(width: 220)
+                        .frame(width: EchoLayout.settingsControlWidth)
                     }
                     hairline
                     labeledRow("Dictation key") {
@@ -27,10 +27,11 @@ struct SettingsView: View {
                             }
                         }
                         .labelsHidden()
-                        .frame(width: 220)
+                        .frame(width: EchoLayout.settingsControlWidth)
                     }
                     if let caveat = settings.hotkey.caveat {
-                        footnote(caveat)
+                        // A caveat is a real warning, so it wears the semantic color.
+                        footnote(caveat, warning: true)
                     }
                     footnote("Hold the key while speaking; release to insert the transcript at your cursor.")
                 }
@@ -44,7 +45,7 @@ struct SettingsView: View {
                         }
                         .labelsHidden()
                         .pickerStyle(.segmented)
-                        .frame(width: 220)
+                        .frame(width: EchoLayout.settingsControlWidth)
                     }
                     hairline
                     labeledRow("Start Echo at login") {
@@ -72,15 +73,13 @@ struct SettingsView: View {
                     footnote("English-optimized Whisper, runs fully on-device. To try another variant: defaults write com.michael.echo modelVariant <name>, then relaunch Echo.")
                 }
             }
-            .frame(maxWidth: 640)
-            .frame(maxWidth: .infinity)
-            .padding(24)
+            .echoContentColumn()
         }
         .onAppear { inputDevices = AudioInputDevices.all() }
     }
 
     private func settingsCard(eyebrow: String, @ViewBuilder content: () -> some View) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Spacing.s) {
             EyebrowText(text: eyebrow)
             content()
         }
@@ -103,10 +102,11 @@ struct SettingsView: View {
         Rectangle().fill(Color.echoHairline).frame(height: 1)
     }
 
-    private func footnote(_ text: String) -> some View {
+    private func footnote(_ text: String, warning: Bool = false) -> some View {
         Text(text)
             .font(.echo(11))
-            .foregroundStyle(Color.echoSecondary.opacity(0.8))
+            // echoSecondary is already the contrast floor — never dim it further.
+            .foregroundStyle(warning ? Color.echoWarning : Color.echoSecondary)
             .fixedSize(horizontal: false, vertical: true)
     }
 }
