@@ -7,6 +7,7 @@ struct HomeView: View {
     @EnvironmentObject private var settings: SettingsStore
     @EnvironmentObject private var transcripts: TranscriptStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var microphoneName = "System Default"
 
     var body: some View {
         ScrollView {
@@ -29,6 +30,11 @@ struct HomeView: View {
                     .echoStagger(2, reduceMotion: reduceMotion)
             }
             .echoContentColumn()
+        }
+        // Same rule as the sidebar: HAL queries only on selection change,
+        // never per render — this view re-renders at waveform frequency.
+        .onChange(of: settings.inputDeviceUID, initial: true) { _, uid in
+            microphoneName = MainWindowView.resolveMicrophoneName(uid: uid)
         }
     }
 
@@ -80,11 +86,6 @@ struct HomeView: View {
     }
 
     // MARK: - Info cards
-
-    private var microphoneName: String {
-        guard let uid = settings.inputDeviceUID else { return "System Default" }
-        return AudioInputDevices.all().first { $0.uid == uid }?.name ?? "System Default"
-    }
 
     private var modelDisplayName: String {
         settings.modelVariant.contains("distil") ? "Whisper Distil Large v3" : settings.modelVariant

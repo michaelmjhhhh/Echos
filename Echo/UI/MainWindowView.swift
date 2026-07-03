@@ -57,6 +57,7 @@ struct MainWindowView: View {
     @EnvironmentObject private var transcripts: TranscriptStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var section: MainSection = .home
+    @State private var microphoneName = "System Default"
 
     var body: some View {
         HStack(spacing: 0) {
@@ -88,6 +89,18 @@ struct MainWindowView: View {
         .background(sectionShortcuts)
         .tint(Color.echoAccent)
         .frame(minWidth: 720, minHeight: 560)
+        // Resolve the mic name only when the selection changes — never in a
+        // body computed property. Core Audio HAL queries are synchronous and
+        // block the main thread (and with it the whole UI) whenever coreaudiod
+        // stalls, so they must not run on every render.
+        .onChange(of: settings.inputDeviceUID, initial: true) { _, uid in
+            microphoneName = Self.resolveMicrophoneName(uid: uid)
+        }
+    }
+
+    static func resolveMicrophoneName(uid: String?) -> String {
+        guard let uid else { return "System Default" }
+        return AudioInputDevices.all().first { $0.uid == uid }?.name ?? "System Default"
     }
 
     /// Hidden ⌘1…⌘5 buttons — keyboard-first navigation without visible chrome.
@@ -192,10 +205,6 @@ struct MainWindowView: View {
         }
     }
 
-    private var microphoneName: String {
-        guard let uid = settings.inputDeviceUID else { return "System Default" }
-        return AudioInputDevices.all().first { $0.uid == uid }?.name ?? "System Default"
-    }
 }
 
 private struct SidebarRow: View {

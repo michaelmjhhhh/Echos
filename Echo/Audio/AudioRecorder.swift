@@ -43,13 +43,24 @@ final class AudioRecorder: AudioRecording {
         shutdownWorkItem?.cancel()
         shutdownWorkItem = nil
 
-        guard let deviceID = deviceUID.flatMap(AudioInputDevices.deviceID(forUID:))
-                ?? Self.defaultInputDeviceID() else {
+        let requestedID = deviceUID.flatMap(AudioInputDevices.deviceID(forUID:))
+        guard let deviceID = requestedID ?? Self.defaultInputDeviceID() else {
             throw AudioRecorderError.noInputDevice
         }
         if engine == nil || engineDeviceID != deviceID || engine?.isRunning != true {
             teardownEngine()
-            try buildEngine(deviceID: deviceID)
+            do {
+                try buildEngine(deviceID: deviceID)
+            } catch {
+                // The chosen mic wouldn't engage (stale UID, half-dropped
+                // Bluetooth link, HAL hiccup). Dictating on the system default
+                // beats failing outright — the selection stays saved for when
+                // the device comes back.
+                guard requestedID != nil,
+                      let fallback = Self.defaultInputDeviceID(),
+                      fallback != deviceID else { throw error }
+                try buildEngine(deviceID: fallback)
+            }
         }
 
         lock.lock()
