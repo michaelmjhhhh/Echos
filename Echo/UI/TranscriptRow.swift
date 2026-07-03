@@ -9,6 +9,7 @@ struct TranscriptRow: View {
 
     @State private var isHovering = false
     @State private var justCopied = false
+    @State private var addingToDictionary = false
     @FocusState private var copyFocused: Bool
 
     var body: some View {
@@ -46,10 +47,19 @@ struct TranscriptRow: View {
         .onHover { hovering in
             withAnimation(Motion.ease) { isHovering = hovering }
         }
+        .contextMenu {
+            Button("Copy") { copy() }
+            // Spotted a word Echo got wrong? Add the right spelling from here.
+            Button("Add to Dictionary…") { addingToDictionary = true }
+        }
+        .sheet(isPresented: $addingToDictionary) {
+            DictionaryEditorSheet(entry: nil)
+        }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(entry.text)
         .accessibilityValue("\(entry.date.formatted(.relative(presentation: .named))), \(entry.wordCount) words")
         .accessibilityAction(named: "Copy") { copy() }
+        .accessibilityAction(named: "Add to Dictionary") { addingToDictionary = true }
     }
 
     private var copyButton: some View {

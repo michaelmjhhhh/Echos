@@ -20,6 +20,7 @@ final class DictationController: ObservableObject {
     private let processors: [TextProcessor]
     private let transcripts: TranscriptStore?
     private let usage: UsageStore?
+    private let dictionary: DictionaryStore?
     private var hotkeyMonitor: HotkeyMonitoring
     private var overlay: OverlayController?
     private var maxDurationTask: Task<Void, Never>?
@@ -49,15 +50,26 @@ final class DictationController: ObservableObject {
         hotkeyMonitor: HotkeyMonitoring? = nil,
         transcripts: TranscriptStore? = nil,
         usage: UsageStore? = nil,
+        dictionary: DictionaryStore? = nil,
         autostart: Bool = true
     ) {
         self.transcripts = transcripts
         self.usage = usage
+        self.dictionary = dictionary
         self.settings = settings
         self.recorder = recorder
         self.transcriber = transcriber ?? TranscriptionService(modelVariant: settings.modelVariant)
         self.inserter = inserter
-        self.processors = processors
+        // Dictionary replacements run last, after generic cleanup. Processors
+        // execute inside the main-actor transcription task, so reading the
+        // store from the provider is safe.
+        if let dictionary {
+            self.processors = processors + [ReplacementProcessor(rulesProvider: {
+                MainActor.assumeIsolated { dictionary.replacementRules }
+            })]
+        } else {
+            self.processors = processors
+        }
         self.hotkeyMonitor = hotkeyMonitor ?? HotkeyMonitor()
 
         self.hotkeyMonitor.onKeyDown = { [weak self] in self?.hotkeyPressed() }
@@ -216,10 +228,11 @@ final class DictationController: ObservableObject {
         state = .transcribing
         let duration = Double(samples.count) / AudioRecorder.sampleRate
         let releasedAt = Date()
+        let vocabulary = dictionary?.promptWords ?? []
         transcriptionTask = Task { [weak self] in
             guard let self else { return }
             do {
-                var text = try await self.transcriber.transcribe(samples)
+                var text = try await self.transcriber.transcribe(samples, vocabulary: vocabulary)
                 for processor in self.processors {
                     text = processor.process(text)
                 }
