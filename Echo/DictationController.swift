@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import os
 
 @MainActor
 final class DictationController: ObservableObject {
@@ -21,6 +22,11 @@ final class DictationController: ObservableObject {
     private let transcripts: TranscriptStore?
     private let usage: UsageStore?
     private let dictionary: DictionaryStore?
+    private let polish: PolishManager?
+    private let snippetProcessor: SnippetProcessor?
+    /// Test seam: lowered by tests so the timeout path doesn't take 4 real seconds.
+    var polishTimeoutSeconds: Double = 4
+    private static let polishLog = Logger(subsystem: "com.michael.echo", category: "polish")
     private var hotkeyMonitor: HotkeyMonitoring
     private var overlay: OverlayController?
     private var maxDurationTask: Task<Void, Never>?
@@ -52,6 +58,7 @@ final class DictationController: ObservableObject {
         usage: UsageStore? = nil,
         dictionary: DictionaryStore? = nil,
         snippets: SnippetStore? = nil,
+        polish: PolishManager? = nil,
         autostart: Bool = true
     ) {
         self.transcripts = transcripts
@@ -61,22 +68,27 @@ final class DictationController: ObservableObject {
         self.recorder = recorder
         self.transcriber = transcriber ?? TranscriptionService(modelVariant: settings.modelVariant)
         self.inserter = inserter
-        // Dictionary replacements run after generic cleanup, snippets last:
-        // a misheard word inside a trigger phrase gets corrected first, so the
-        // snippet still fires. Processors execute inside the main-actor
-        // transcription task, so reading the stores from providers is safe.
+        self.polish = polish
+        // Dictionary replacements run after generic cleanup, fixing misheard
+        // words before the polish model or snippet matching sees them.
+        // Processors execute inside the main-actor transcription task, so
+        // reading the stores from providers is safe.
         var pipeline = processors
         if let dictionary {
             pipeline.append(ReplacementProcessor(rulesProvider: {
                 MainActor.assumeIsolated { dictionary.replacementRules }
             }))
         }
-        if let snippets {
-            pipeline.append(SnippetProcessor(rulesProvider: {
-                MainActor.assumeIsolated { snippets.rules }
-            }))
-        }
         self.processors = pipeline
+        // Snippets wrap the polish step instead of joining the pipeline: a
+        // standalone trigger skips polish entirely, and mid-sentence
+        // expansion runs after it, so saved expansions (emails, links,
+        // prompts) are never rewritten by the model.
+        self.snippetProcessor = snippets.map { store in
+            SnippetProcessor(rulesProvider: {
+                MainActor.assumeIsolated { store.rules }
+            })
+        }
         self.hotkeyMonitor = hotkeyMonitor ?? HotkeyMonitor()
 
         self.hotkeyMonitor.onKeyDown = { [weak self] in self?.hotkeyPressed() }
@@ -243,6 +255,16 @@ final class DictationController: ObservableObject {
                 for processor in self.processors {
                     text = processor.process(text)
                 }
+                if let expansion = self.snippetProcessor?.standaloneExpansion(of: text) {
+                    // A standalone trigger's expansion is literal saved
+                    // content — inserted verbatim, never polished.
+                    text = expansion
+                } else {
+                    text = await self.polishIfEnabled(text)
+                    if let snippetProcessor = self.snippetProcessor {
+                        text = snippetProcessor.expandMidSentence(text)
+                    }
+                }
                 guard !text.isEmpty else {
                     self.state = .idle
                     return
@@ -280,6 +302,45 @@ final class DictationController: ObservableObject {
                 self.state = .error("Transcription failed: \(error.localizedDescription)")
                 self.scheduleReturnToIdle()
             }
+        }
+    }
+
+    // MARK: - Polish
+
+    /// Best-effort polish: length gate, hard timeout, output validation —
+    /// any failure returns the raw text so a dictation is never lost or
+    /// stalled. Runs inside the existing `.transcribing` state.
+    private func polishIfEnabled(_ text: String) async -> String {
+        guard let polisher = polish?.activePolisher,
+              PolishPrompt.shouldPolish(text) else { return text }
+        do {
+            let output = try await Self.withTimeout(seconds: polishTimeoutSeconds) {
+                try await polisher.polish(text)
+            }
+            if let accepted = PolishPrompt.accepted(output: output, input: text) {
+                return accepted
+            }
+            Self.polishLog.log("polish output rejected, falling back to raw transcript")
+            return text
+        } catch {
+            Self.polishLog.log("polish failed (\(error.localizedDescription, privacy: .public)), falling back to raw transcript")
+            return text
+        }
+    }
+
+    private static func withTimeout<T: Sendable>(
+        seconds: Double,
+        _ operation: @escaping () async throws -> T
+    ) async throws -> T {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask { try await operation() }
+            group.addTask {
+                try await Task.sleep(for: .seconds(seconds))
+                throw PolishError.timedOut
+            }
+            guard let first = try await group.next() else { throw PolishError.timedOut }
+            group.cancelAll()
+            return first
         }
     }
 

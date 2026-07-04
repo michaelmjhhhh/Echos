@@ -251,6 +251,127 @@ final class DictationControllerTests: XCTestCase {
         await controller.transcriptionTask?.value
         XCTAssertEqual(transcriber.receivedVocabulary, [])
     }
+
+    // MARK: - Polish integration
+
+    private func makePolishController(
+        polisher: Polishing,
+        snippets: SnippetStore? = nil
+    ) async -> DictationController {
+        recorder = MockRecorder()
+        transcriber = MockTranscriber()
+        inserter = MockInserter()
+        let settings = SettingsStore(defaults: UserDefaults(suiteName: "EchoTests-\(UUID().uuidString)")!)
+        settings.polishEnabled = true
+        let polish = PolishManager(settings: settings, service: polisher)
+        await polish.prepareTask?.value
+        let controller = DictationController(
+            settings: settings,
+            recorder: recorder,
+            transcriber: transcriber,
+            inserter: inserter,
+            hotkeyMonitor: MockHotkeyMonitor(),
+            snippets: snippets,
+            polish: polish,
+            autostart: false
+        )
+        controller.activateForTesting()
+        recorder.samplesToReturn = [Float](repeating: 0, count: 16_000)
+        return controller
+    }
+
+    private func makeSnippetStore(trigger: String, expansion: String) -> SnippetStore {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("EchoSnippets-\(UUID().uuidString)", isDirectory: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let store = SnippetStore(directory: directory)
+        store.add(trigger: trigger, expansion: expansion)
+        return store
+    }
+
+    func testPolishedTextIsInserted() async {
+        let polisher = MockPolisher()
+        polisher.result = .success("Hello there, everyone.")
+        let controller = await makePolishController(polisher: polisher)
+        transcriber.result = .success("um hello there everyone")
+        controller.hotkeyPressed()
+        controller.hotkeyReleased()
+        await controller.transcriptionTask?.value
+        XCTAssertEqual(inserter.insertedText, "Hello there, everyone.")
+        XCTAssertEqual(polisher.polishedInputs, ["um hello there everyone"])
+    }
+
+    func testPolishErrorFallsBackToRawTranscript() async {
+        let polisher = MockPolisher()
+        polisher.result = .failure(PolishError.modelNotLoaded)
+        let controller = await makePolishController(polisher: polisher)
+        transcriber.result = .success("hello there everyone today")
+        controller.hotkeyPressed()
+        controller.hotkeyReleased()
+        await controller.transcriptionTask?.value
+        XCTAssertEqual(inserter.insertedText, "hello there everyone today")
+        XCTAssertEqual(controller.state, .idle) // a polish failure is not a dictation error
+    }
+
+    func testPolishTimeoutFallsBackToRawTranscript() async {
+        let polisher = MockPolisher()
+        polisher.result = .success("too late")
+        polisher.delay = .seconds(10)
+        let controller = await makePolishController(polisher: polisher)
+        controller.polishTimeoutSeconds = 0.05
+        transcriber.result = .success("hello there everyone today")
+        controller.hotkeyPressed()
+        controller.hotkeyReleased()
+        await controller.transcriptionTask?.value
+        XCTAssertEqual(inserter.insertedText, "hello there everyone today")
+    }
+
+    func testRejectedPolishOutputFallsBackToRawTranscript() async {
+        let polisher = MockPolisher()
+        polisher.result = .success("Here is the cleaned text: hello everyone today")
+        let controller = await makePolishController(polisher: polisher)
+        transcriber.result = .success("hello there everyone today")
+        controller.hotkeyPressed()
+        controller.hotkeyReleased()
+        await controller.transcriptionTask?.value
+        XCTAssertEqual(inserter.insertedText, "hello there everyone today")
+    }
+
+    func testShortTranscriptSkipsPolish() async {
+        let polisher = MockPolisher()
+        let controller = await makePolishController(polisher: polisher)
+        transcriber.result = .success("send it now")
+        controller.hotkeyPressed()
+        controller.hotkeyReleased()
+        await controller.transcriptionTask?.value
+        XCTAssertEqual(inserter.insertedText, "send it now")
+        XCTAssertTrue(polisher.polishedInputs.isEmpty)
+    }
+
+    func testStandaloneSnippetBypassesPolish() async {
+        let polisher = MockPolisher()
+        let snippets = makeSnippetStore(trigger: "my email address", expansion: "jhmamichael@gmail.com")
+        let controller = await makePolishController(polisher: polisher, snippets: snippets)
+        transcriber.result = .success("My email address.")
+        controller.hotkeyPressed()
+        controller.hotkeyReleased()
+        await controller.transcriptionTask?.value
+        XCTAssertEqual(inserter.insertedText, "jhmamichael@gmail.com")
+        XCTAssertTrue(polisher.polishedInputs.isEmpty)
+    }
+
+    func testMidSentenceSnippetExpandsAfterPolish() async {
+        let polisher = MockPolisher()
+        polisher.result = .success("Send it to my email, please.")
+        let snippets = makeSnippetStore(trigger: "my email", expansion: "jhmamichael@gmail.com")
+        let controller = await makePolishController(polisher: polisher, snippets: snippets)
+        transcriber.result = .success("um send it to my email please")
+        controller.hotkeyPressed()
+        controller.hotkeyReleased()
+        await controller.transcriptionTask?.value
+        XCTAssertEqual(polisher.polishedInputs, ["um send it to my email please"])
+        XCTAssertEqual(inserter.insertedText, "Send it to jhmamichael@gmail.com, please.")
+    }
 }
 
 // MARK: - Mocks
@@ -311,4 +432,19 @@ private final class MockHotkeyMonitor: HotkeyMonitoring {
 
     func start() {}
     func stop() {}
+}
+
+private final class MockPolisher: Polishing {
+    var result: Result<String, Error> = .success("")
+    var delay: Duration = .zero
+    var polishedInputs: [String] = []
+
+    func prepare(progress: @escaping (Double) -> Void) async throws {}
+    func unload() {}
+
+    func polish(_ text: String) async throws -> String {
+        polishedInputs.append(text)
+        if delay > .zero { try await Task.sleep(for: delay) }
+        return try result.get()
+    }
 }
