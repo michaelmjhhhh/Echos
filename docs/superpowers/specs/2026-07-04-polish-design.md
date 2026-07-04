@@ -1,7 +1,25 @@
 # Polish: local LLM cleanup pass — design
 
 **Date:** 2026-07-04
-**Status:** Approved
+**Status:** ⚠️ EXPERIMENTAL / INCOMPLETE — DO NOT MERGE
+
+> This branch is **self-contained and code-complete** (all 7 planned tasks
+> implemented, individually reviewed, whole-branch review passed, 127 tests
+> green) but it is **not a shippable feature** and was intentionally left on a
+> branch rather than merged to `main`.
+>
+> **Why incomplete:** live testing showed the default on-device model
+> (`Llama-3.2-1B-Instruct-4bit`) *summarizes* a dictation to a single keyword
+> instead of cleaning it — e.g. "So basically I think we should move the meeting
+> to Thursday" came back as just "Thursday". A 1B model is too weak at
+> instruction-following for faithful cleanup. Shipping would require a stronger
+> on-device model (e.g. `Qwen2.5-1.5B-Instruct-4bit`) and hardening the
+> acceptance guardrails (add a lower-length bound so over-collapsed output falls
+> back to the raw transcript). The infrastructure (MLX integration, lifecycle,
+> settings, pipeline wiring, tests) is sound and reusable; the model/prompt is
+> the unfinished part.
+>
+> Preserved for future work. Original design below.
 
 ## Summary
 
