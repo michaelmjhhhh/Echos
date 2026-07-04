@@ -7,18 +7,22 @@ struct EchoApp: App {
     @StateObject private var transcripts: TranscriptStore
     @StateObject private var usage: UsageStore
     @StateObject private var dictionary: DictionaryStore
+    @StateObject private var snippets: SnippetStore
 
     init() {
         let transcriptStore = TranscriptStore()
         let usageStore = UsageStore()
         let dictionaryStore = DictionaryStore()
+        let snippetStore = SnippetStore()
         _transcripts = StateObject(wrappedValue: transcriptStore)
         _usage = StateObject(wrappedValue: usageStore)
         _dictionary = StateObject(wrappedValue: dictionaryStore)
+        _snippets = StateObject(wrappedValue: snippetStore)
         _controller = StateObject(wrappedValue: DictationController(
             transcripts: transcriptStore,
             usage: usageStore,
-            dictionary: dictionaryStore
+            dictionary: dictionaryStore,
+            snippets: snippetStore
         ))
     }
 
@@ -30,6 +34,7 @@ struct EchoApp: App {
                 .environmentObject(transcripts)
                 .environmentObject(usage)
                 .environmentObject(dictionary)
+                .environmentObject(snippets)
         }
         .defaultSize(width: 760, height: 620)
 

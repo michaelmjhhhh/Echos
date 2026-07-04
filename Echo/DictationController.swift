@@ -51,6 +51,7 @@ final class DictationController: ObservableObject {
         transcripts: TranscriptStore? = nil,
         usage: UsageStore? = nil,
         dictionary: DictionaryStore? = nil,
+        snippets: SnippetStore? = nil,
         autostart: Bool = true
     ) {
         self.transcripts = transcripts
@@ -60,16 +61,22 @@ final class DictationController: ObservableObject {
         self.recorder = recorder
         self.transcriber = transcriber ?? TranscriptionService(modelVariant: settings.modelVariant)
         self.inserter = inserter
-        // Dictionary replacements run last, after generic cleanup. Processors
-        // execute inside the main-actor transcription task, so reading the
-        // store from the provider is safe.
+        // Dictionary replacements run after generic cleanup, snippets last:
+        // a misheard word inside a trigger phrase gets corrected first, so the
+        // snippet still fires. Processors execute inside the main-actor
+        // transcription task, so reading the stores from providers is safe.
+        var pipeline = processors
         if let dictionary {
-            self.processors = processors + [ReplacementProcessor(rulesProvider: {
+            pipeline.append(ReplacementProcessor(rulesProvider: {
                 MainActor.assumeIsolated { dictionary.replacementRules }
-            })]
-        } else {
-            self.processors = processors
+            }))
         }
+        if let snippets {
+            pipeline.append(SnippetProcessor(rulesProvider: {
+                MainActor.assumeIsolated { snippets.rules }
+            }))
+        }
+        self.processors = pipeline
         self.hotkeyMonitor = hotkeyMonitor ?? HotkeyMonitor()
 
         self.hotkeyMonitor.onKeyDown = { [weak self] in self?.hotkeyPressed() }

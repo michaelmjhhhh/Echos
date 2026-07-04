@@ -86,4 +86,18 @@ final class SnippetProcessorTests: XCTestCase {
         let sut = processor([])
         XCTAssertEqual(sut.process("nothing to see here."), "nothing to see here.")
     }
+
+    // MARK: - Pipeline ordering
+
+    func testDictionaryReplacementFeedsSnippetTrigger() {
+        // Whisper heard "male" for "mail"; the dictionary fixes it, then the
+        // snippet fires — this is why ReplacementProcessor must run first.
+        let replacement = ReplacementProcessor(rulesProvider: { [(misspelling: "male", word: "mail")] })
+        let snippet = SnippetProcessor(rulesProvider: { [(trigger: "my mail", expansion: "jhmamichael@gmail.com")] })
+        let processors: [TextProcessor] = [WhitespaceCleanupProcessor(), replacement, snippet]
+
+        var text = "send it to my male please"
+        for processor in processors { text = processor.process(text) }
+        XCTAssertEqual(text, "send it to jhmamichael@gmail.com please")
+    }
 }
