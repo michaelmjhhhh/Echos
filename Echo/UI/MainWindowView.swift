@@ -5,6 +5,7 @@ enum MainSection: String, CaseIterable, Identifiable {
     case insights
     case history
     case dictionary
+    case snippets
     case settings
 
     var id: String { rawValue }
@@ -15,6 +16,7 @@ enum MainSection: String, CaseIterable, Identifiable {
         case .insights: return "Insights"
         case .history: return "History"
         case .dictionary: return "Dictionary"
+        case .snippets: return "Snippets"
         case .settings: return "Settings"
         }
     }
@@ -25,18 +27,20 @@ enum MainSection: String, CaseIterable, Identifiable {
         case .insights: return "chart.bar.xaxis"
         case .history: return "clock.arrow.circlepath"
         case .dictionary: return "character.book.closed"
+        case .snippets: return "text.insert"
         case .settings: return "gearshape"
         }
     }
 
-    /// ⌘1…⌘5, in sidebar order.
+    /// ⌘1…⌘6, in sidebar order.
     var shortcutKey: KeyEquivalent {
         switch self {
         case .home: return "1"
         case .insights: return "2"
         case .history: return "3"
         case .dictionary: return "4"
-        case .settings: return "5"
+        case .snippets: return "5"
+        case .settings: return "6"
         }
     }
 
@@ -46,7 +50,8 @@ enum MainSection: String, CaseIterable, Identifiable {
         case .insights: return "⌘2"
         case .history: return "⌘3"
         case .dictionary: return "⌘4"
-        case .settings: return "⌘5"
+        case .snippets: return "⌘5"
+        case .settings: return "⌘6"
         }
     }
 }
@@ -75,6 +80,7 @@ struct MainWindowView: View {
                 case .insights: InsightsView()
                 case .history: HistoryView()
                 case .dictionary: DictionaryView()
+                case .snippets: SnippetsView()
                 case .settings: SettingsView()
                 }
             }
@@ -103,7 +109,7 @@ struct MainWindowView: View {
         return AudioInputDevices.all().first { $0.uid == uid }?.name ?? "System Default"
     }
 
-    /// Hidden ⌘1…⌘5 buttons — keyboard-first navigation without visible chrome.
+    /// Hidden ⌘1…⌘6 buttons — keyboard-first navigation without visible chrome.
     private var sectionShortcuts: some View {
         ForEach(MainSection.allCases) { item in
             Button(item.title) {
