@@ -44,6 +44,7 @@ cursor ◄── ⌘V paste (clipboard saved & restored) ◄── TextProcessor
 - **Hotkey:** configurable in Settings (Right ⌥ / Right ⌘ / Fn).
 - **Insertion:** clipboard paste with save/restore — the only method that works reliably across native, Electron, and browser apps. If a password field has focus (secure input), Echo leaves the transcript on the clipboard instead.
 - **TextProcessor pipeline:** raw Whisper text flows through cleanup stages before insertion; this is the hook for a future local-LLM formatting pass.
+- **Snippets:** save text you type often (an email, link, or prompt) with a trigger phrase; say the trigger — alone or mid-sentence — and Echo inserts the saved text instead. Matching is case-insensitive; expansions are inserted verbatim.
 
 ## Tests
 
