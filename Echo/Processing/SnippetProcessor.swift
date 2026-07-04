@@ -14,16 +14,28 @@ struct SnippetProcessor: TextProcessor {
     let rulesProvider: () -> [(trigger: String, expansion: String)]
 
     func process(_ text: String) -> String {
-        let rules = rulesProvider()
-        guard !rules.isEmpty else { return text }
+        standaloneExpansion(of: text) ?? expandMidSentence(text)
+    }
 
-        // Standalone: strip surrounding whitespace and trailing punctuation,
-        // then compare against each trigger whole.
+    /// The expansion when the entire utterance is a single trigger (Whisper
+    /// may append punctuation), or nil. Split out so DictationController can
+    /// bypass the polish pass for standalone triggers.
+    func standaloneExpansion(of text: String) -> String? {
+        let rules = rulesProvider()
+        guard !rules.isEmpty else { return nil }
         let standalone = standaloneCandidate(text)
         for rule in rules where standalone.caseInsensitiveCompare(rule.trigger) == .orderedSame {
             return rule.expansion
         }
+        return nil
+    }
 
+    /// Whole-word, case-insensitive trigger replacement inside a longer
+    /// utterance. Runs after the polish pass so expansions are never
+    /// rewritten by the model.
+    func expandMidSentence(_ text: String) -> String {
+        let rules = rulesProvider()
+        guard !rules.isEmpty else { return text }
         var result = text
         for rule in rules {
             let pattern = "\\b" + NSRegularExpression.escapedPattern(for: rule.trigger) + "\\b"

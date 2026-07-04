@@ -100,4 +100,37 @@ final class SnippetProcessorTests: XCTestCase {
         for processor in processors { text = processor.process(text) }
         XCTAssertEqual(text, "send it to jhmamichael@gmail.com please")
     }
+
+    // MARK: - Split entry points (polish integration)
+
+    func testStandaloneExpansionReturnsExpansionForWholeUtterance() {
+        let sut = processor([("my email address", "jhmamichael@gmail.com")])
+        XCTAssertEqual(sut.standaloneExpansion(of: "My email address."), "jhmamichael@gmail.com")
+    }
+
+    func testStandaloneExpansionIsNilForMidSentenceText() {
+        let sut = processor([("my email address", "jhmamichael@gmail.com")])
+        XCTAssertNil(sut.standaloneExpansion(of: "send it to my email address today"))
+    }
+
+    func testStandaloneExpansionIsNilWithNoRules() {
+        XCTAssertNil(processor([]).standaloneExpansion(of: "anything"))
+    }
+
+    func testExpandMidSentenceReplacesTriggersOnly() {
+        let sut = processor([("my email", "jhmamichael@gmail.com")])
+        XCTAssertEqual(
+            sut.expandMidSentence("Send it to my email, please."),
+            "Send it to jhmamichael@gmail.com, please."
+        )
+    }
+
+    func testProcessStillComposesBothModes() {
+        let sut = processor([("my email address", "jhmamichael@gmail.com")])
+        XCTAssertEqual(sut.process("my email address"), "jhmamichael@gmail.com")
+        XCTAssertEqual(
+            sut.process("send to my email address now"),
+            "send to jhmamichael@gmail.com now"
+        )
+    }
 }
