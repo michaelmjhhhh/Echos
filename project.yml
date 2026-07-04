@@ -9,6 +9,9 @@ packages:
   ArgmaxOSS:
     url: https://github.com/argmaxinc/argmax-oss-swift.git
     from: 0.9.0
+  MLXSwiftLM:
+    url: https://github.com/ml-explore/mlx-swift-lm.git
+    from: 2.30.3
 
 targets:
   Echo:
@@ -19,6 +22,10 @@ targets:
     dependencies:
       - package: ArgmaxOSS
         product: WhisperKit
+      - package: MLXSwiftLM
+        product: MLXLLM
+      - package: MLXSwiftLM
+        product: MLXLMCommon
     info:
       path: Echo/Info.plist
       properties:
