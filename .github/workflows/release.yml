@@ -3,6 +3,20 @@ name: Release
 # Publish a DMG to GitHub Releases whenever a version tag is pushed:
 #   git tag v0.2.0 && git push origin v0.2.0
 # workflow_dispatch builds the DMG as an artifact without publishing a release.
+#
+# Signing modes (chosen automatically):
+#   - If the Developer ID secrets below are set, the app is signed with the
+#     hardened runtime, the DMG is notarized and stapled, and recipients can
+#     open it with a normal double-click.
+#   - Otherwise the build is ad-hoc signed and the release notes include the
+#     one-time `xattr -cr` Gatekeeper instruction.
+#
+# Required secrets for notarized releases:
+#   DEVELOPER_ID_P12          base64 of the "Developer ID Application" cert (.p12)
+#   DEVELOPER_ID_P12_PASSWORD password protecting the .p12
+#   NOTARY_KEY_P8             base64 of the App Store Connect API key (.p8)
+#   NOTARY_KEY_ID             the API key ID
+#   NOTARY_ISSUER_ID          the API key issuer ID
 
 on:
   push:
@@ -15,6 +29,9 @@ permissions:
 jobs:
   release:
     runs-on: macos-15
+    env:
+      SIGNING_ENABLED: ${{ secrets.DEVELOPER_ID_P12 != '' && secrets.NOTARY_KEY_P8 != '' }}
+      APP: build/Build/Products/Release/Echo.app
     steps:
       - uses: actions/checkout@v4
 
@@ -24,32 +41,87 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
-      # CI has no signing certificate, so override the identity from
-      # project.yml with ad-hoc signing. Apple Silicon only (see README).
+      # Build unsigned; the dedicated signing step below picks the identity.
+      # Apple Silicon only (see README).
       - name: Build Echo.app
         run: |
           xcodebuild -scheme Echo -configuration Release \
             -derivedDataPath build \
             ARCHS=arm64 \
-            CODE_SIGN_IDENTITY=- \
+            CODE_SIGNING_ALLOWED=NO \
             build
 
       - name: Stamp version from tag
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          APP="build/Build/Products/Release/Echo.app"
           /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$APP/Contents/Info.plist"
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $GITHUB_RUN_NUMBER" "$APP/Contents/Info.plist"
-          codesign --force --deep -s - "$APP"
+
+      - name: Import Developer ID certificate
+        if: env.SIGNING_ENABLED == 'true'
+        env:
+          DEVELOPER_ID_P12: ${{ secrets.DEVELOPER_ID_P12 }}
+          DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/build.keychain-db"
+          KEYCHAIN_PW="$(openssl rand -base64 24)"
+          echo "$DEVELOPER_ID_P12" | base64 -d > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KEYCHAIN_PW" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PW" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" \
+            -P "$DEVELOPER_ID_P12_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: \
+            -k "$KEYCHAIN_PW" "$KEYCHAIN" > /dev/null
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
+          rm "$RUNNER_TEMP/cert.p12"
+
+      - name: Sign Echo.app
+        run: |
+          if [ "$SIGNING_ENABLED" = "true" ]; then
+            IDENTITY="Developer ID Application"
+            FLAGS=(--options runtime --timestamp)
+          else
+            IDENTITY="-"
+            FLAGS=()
+          fi
+          if [ -d "$APP/Contents/Frameworks" ]; then
+            find "$APP/Contents/Frameworks" -depth \
+              \( -name "*.framework" -o -name "*.dylib" \) \
+              -exec codesign --force "${FLAGS[@]}" -s "$IDENTITY" {} \;
+          fi
+          codesign --force "${FLAGS[@]}" \
+            --entitlements Echo/Echo.entitlements \
+            -s "$IDENTITY" "$APP"
+          codesign --verify --verbose=2 "$APP"
 
       - name: Create DMG
         run: |
           STAGING=dmg-staging
           mkdir "$STAGING"
-          cp -R "build/Build/Products/Release/Echo.app" "$STAGING/"
+          cp -R "$APP" "$STAGING/"
           ln -s /Applications "$STAGING/Applications"
           hdiutil create -volname "Echo" -srcfolder "$STAGING" -ov -format UDZO "Echo-${GITHUB_REF_NAME}.dmg"
+
+      - name: Notarize and staple DMG
+        if: env.SIGNING_ENABLED == 'true'
+        env:
+          NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+        run: |
+          DMG="Echo-${GITHUB_REF_NAME}.dmg"
+          codesign --force --timestamp -s "Developer ID Application" "$DMG"
+          echo "$NOTARY_KEY_P8" | base64 -d > "$RUNNER_TEMP/notary.p8"
+          xcrun notarytool submit "$DMG" \
+            --key "$RUNNER_TEMP/notary.p8" \
+            --key-id "$NOTARY_KEY_ID" \
+            --issuer "$NOTARY_ISSUER_ID" \
+            --wait
+          rm "$RUNNER_TEMP/notary.p8"
+          xcrun stapler staple "$DMG"
+          xcrun stapler validate "$DMG"
 
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v4
@@ -62,7 +134,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cat > release-notes.md <<'EOF'
+          if [ "$SIGNING_ENABLED" = "true" ]; then
+            cat > release-notes.md <<'EOF'
+          ## Install
+
+          1. Download the DMG below, open it, and drag **Echo** to **Applications**.
+          2. Launch Echo, grant **Microphone** and **Accessibility** permissions, and wait for the one-time model download (~600 MB).
+          3. Hold **Right ⌥**, speak, release.
+
+          Requires an Apple Silicon Mac running macOS 14+.
+          EOF
+          else
+            cat > release-notes.md <<'EOF'
           ## Install
 
           1. Download the DMG below, open it, and drag **Echo** to **Applications**.
@@ -77,6 +160,7 @@ jobs:
 
           Requires an Apple Silicon Mac running macOS 14+.
           EOF
+          fi
           gh release create "$GITHUB_REF_NAME" "Echo-${GITHUB_REF_NAME}.dmg" \
             --title "Echo ${GITHUB_REF_NAME}" \
             --notes-file release-notes.md \
