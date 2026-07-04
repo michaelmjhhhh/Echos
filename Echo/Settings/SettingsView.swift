@@ -3,6 +3,7 @@ import SwiftUI
 /// The Settings section of the main window (no longer a separate Settings scene).
 struct SettingsView: View {
     @EnvironmentObject private var settings: SettingsStore
+    @EnvironmentObject private var polish: PolishManager
     @State private var inputDevices: [AudioInputDevice] = []
 
     var body: some View {
@@ -62,6 +63,31 @@ struct SettingsView: View {
                             .controlSize(.small)
                     }
                     footnote("History is stored only on this Mac — nothing ever leaves it.")
+                }
+
+                settingsCard(eyebrow: "Polish") {
+                    labeledRow("Clean up transcripts") {
+                        Toggle("", isOn: $settings.polishEnabled)
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .controlSize(.small)
+                    }
+                    if case .preparing(let progress) = polish.status {
+                        HStack(spacing: Spacing.xs) {
+                            ProgressView(value: progress)
+                                .controlSize(.small)
+                                .tint(Color.echoAccent)
+                                .frame(width: EchoLayout.settingsControlWidth)
+                            Text("Preparing model… \(Int(progress * 100))%")
+                                .font(.echoMono(10))
+                                .monospacedDigit()
+                                .foregroundStyle(Color.echoSecondary)
+                        }
+                    }
+                    if case .failed(let message) = polish.status {
+                        footnote(message, warning: true)
+                    }
+                    footnote("Removes filler words and false starts and fixes punctuation with a small language model that runs entirely on this Mac. One-time ~0.7 GB download; turning it off frees the memory.")
                 }
 
                 settingsCard(eyebrow: "Model") {
