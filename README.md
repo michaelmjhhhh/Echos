@@ -4,7 +4,17 @@ Free, fully-local "dictate anywhere" for macOS — a subscription-free alternati
 
 Hold **Right ⌥**, speak, release: your words are typed into whatever app has focus. Transcription runs entirely on-device with [WhisperKit](https://github.com/argmaxinc/argmax-oss-swift) (CoreML, Apple Neural Engine). No network calls, no accounts.
 
-## Requirements
+## Install (prebuilt)
+
+Grab the latest DMG from [Releases](https://github.com/michaelmjhhhh/Echos/releases), drag **Echo** to **Applications**, then clear the quarantine flag once (the build is unsigned/not notarized):
+
+```sh
+xattr -cr /Applications/Echo.app
+```
+
+Requires an Apple Silicon Mac, macOS 14+.
+
+## Requirements (building from source)
 
 - Apple Silicon Mac, macOS 14+
 - Xcode 16+ and [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`)

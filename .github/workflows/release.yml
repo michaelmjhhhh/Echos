@@ -1,0 +1,83 @@
+name: Release
+
+# Publish a DMG to GitHub Releases whenever a version tag is pushed:
+#   git tag v0.2.0 && git push origin v0.2.0
+# workflow_dispatch builds the DMG as an artifact without publishing a release.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      # CI has no signing certificate, so override the identity from
+      # project.yml with ad-hoc signing. Apple Silicon only (see README).
+      - name: Build Echo.app
+        run: |
+          xcodebuild -scheme Echo -configuration Release \
+            -derivedDataPath build \
+            ARCHS=arm64 \
+            CODE_SIGN_IDENTITY=- \
+            build
+
+      - name: Stamp version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          APP="build/Build/Products/Release/Echo.app"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$APP/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $GITHUB_RUN_NUMBER" "$APP/Contents/Info.plist"
+          codesign --force --deep -s - "$APP"
+
+      - name: Create DMG
+        run: |
+          STAGING=dmg-staging
+          mkdir "$STAGING"
+          cp -R "build/Build/Products/Release/Echo.app" "$STAGING/"
+          ln -s /Applications "$STAGING/Applications"
+          hdiutil create -volname "Echo" -srcfolder "$STAGING" -ov -format UDZO "Echo-${GITHUB_REF_NAME}.dmg"
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Echo-dmg
+          path: Echo-*.dmg
+
+      - name: Publish GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > release-notes.md <<'EOF'
+          ## Install
+
+          1. Download the DMG below, open it, and drag **Echo** to **Applications**.
+          2. Echo is not notarized (it's a free, unsigned build), so macOS will refuse to open it at first. Clear the quarantine flag once:
+
+             ```sh
+             xattr -cr /Applications/Echo.app
+             ```
+
+          3. Launch Echo, grant **Microphone** and **Accessibility** permissions, and wait for the one-time model download (~600 MB).
+          4. Hold **Right ⌥**, speak, release.
+
+          Requires an Apple Silicon Mac running macOS 14+.
+          EOF
+          gh release create "$GITHUB_REF_NAME" "Echo-${GITHUB_REF_NAME}.dmg" \
+            --title "Echo ${GITHUB_REF_NAME}" \
+            --notes-file release-notes.md \
+            --generate-notes
