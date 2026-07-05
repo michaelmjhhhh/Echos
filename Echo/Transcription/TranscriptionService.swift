@@ -15,15 +15,25 @@ protocol Transcribing {
 /// transcribes 16 kHz mono Float32 sample buffers on-device.
 final class TranscriptionService: Transcribing {
     private let modelVariant: String
-    private var modelFolder: URL?
+    /// nil = HubApi's default (~/Documents/huggingface); injectable for tests.
+    private let downloadBase: URL?
+    private(set) var modelFolder: URL?
     private var whisperKit: WhisperKit?
 
-    init(modelVariant: String) {
+    init(modelVariant: String, downloadBase: URL? = nil) {
         self.modelVariant = modelVariant
+        self.downloadBase = downloadBase
     }
 
     func prepare(progress: @escaping (Double) -> Void) async throws {
-        modelFolder = try await WhisperKit.download(variant: modelVariant) { downloadProgress in
+        // Already on disk → prepare locally so switching to a downloaded
+        // model (and reverting after a failed switch) works offline.
+        if WhisperModelPaths.isDownloaded(modelVariant, downloadBase: downloadBase) {
+            modelFolder = WhisperModelPaths.modelFolder(for: modelVariant, downloadBase: downloadBase)
+            progress(1)
+            return
+        }
+        modelFolder = try await WhisperKit.download(variant: modelVariant, downloadBase: downloadBase) { downloadProgress in
             progress(downloadProgress.fractionCompleted)
         }
     }

@@ -1,3 +1,4 @@
+import Combine
 import XCTest
 @testable import Echo
 
@@ -6,17 +7,19 @@ final class DictationControllerTests: XCTestCase {
     private var recorder: MockRecorder!
     private var transcriber: MockTranscriber!
     private var inserter: MockInserter!
+    private var settings: SettingsStore!
 
-    private func makeController() -> DictationController {
+    private func makeController(transcriberFactory: ((String) -> Transcribing)? = nil) -> DictationController {
         recorder = MockRecorder()
         transcriber = MockTranscriber()
         inserter = MockInserter()
         let defaults = UserDefaults(suiteName: "EchoTests-\(UUID().uuidString)")!
-        let settings = SettingsStore(defaults: defaults)
+        settings = SettingsStore(defaults: defaults)
         return DictationController(
             settings: settings,
             recorder: recorder,
             transcriber: transcriber,
+            transcriberFactory: transcriberFactory,
             inserter: inserter,
             hotkeyMonitor: MockHotkeyMonitor(),
             autostart: false
@@ -251,6 +254,103 @@ final class DictationControllerTests: XCTestCase {
         await controller.transcriptionTask?.value
         XCTAssertEqual(transcriber.receivedVocabulary, [])
     }
+
+    // MARK: - Model switching
+
+    func testSwitchModelSwapsTranscriberAndPersistsVariant() async {
+        let newMock = MockTranscriber()
+        var requested: [String] = []
+        let controller = makeController(transcriberFactory: { variant in
+            requested.append(variant)
+            return newMock
+        })
+        controller.activateForTesting()
+
+        await controller.switchModel(to: "openai_whisper-base.en")
+
+        XCTAssertEqual(requested, ["openai_whisper-base.en"])
+        XCTAssertEqual(settings.modelVariant, "openai_whisper-base.en")
+        XCTAssertEqual(controller.state, .idle)
+        XCTAssertNil(controller.pendingModelVariant)
+
+        // The next dictation must reach the new transcriber.
+        recorder.samplesToReturn = [Float](repeating: 0, count: 16_000)
+        newMock.result = .success("via new model")
+        controller.hotkeyPressed()
+        controller.hotkeyReleased()
+        await controller.transcriptionTask?.value
+        XCTAssertEqual(inserter.insertedText, "via new model")
+    }
+
+    func testSwitchModelIgnoredWhileRecording() async {
+        var requested: [String] = []
+        let controller = makeController(transcriberFactory: { variant in
+            requested.append(variant)
+            return MockTranscriber()
+        })
+        controller.activateForTesting()
+        let originalVariant = settings.modelVariant
+        controller.hotkeyPressed()
+
+        await controller.switchModel(to: "openai_whisper-base.en")
+
+        XCTAssertEqual(controller.state, .recording)
+        XCTAssertEqual(settings.modelVariant, originalVariant)
+        XCTAssertEqual(requested, [])
+    }
+
+    func testSwitchModelIgnoredForSameVariant() async {
+        var requested: [String] = []
+        let controller = makeController(transcriberFactory: { variant in
+            requested.append(variant)
+            return MockTranscriber()
+        })
+        controller.activateForTesting()
+
+        await controller.switchModel(to: settings.modelVariant)
+
+        XCTAssertEqual(requested, [])
+        XCTAssertEqual(controller.state, .idle)
+    }
+
+    func testSwitchModelFailureRevertsToPreviousModel() async {
+        let failing = MockTranscriber()
+        failing.loadError = TranscriptionError.modelNotLoaded
+        let reverted = MockTranscriber()
+        var requested: [String] = []
+        let controller = makeController(transcriberFactory: { variant in
+            requested.append(variant)
+            return variant == "openai_whisper-base.en" ? failing : reverted
+        })
+        controller.activateForTesting()
+        let originalVariant = settings.modelVariant
+
+        await controller.switchModel(to: "openai_whisper-base.en")
+
+        XCTAssertEqual(requested, ["openai_whisper-base.en", originalVariant])
+        XCTAssertEqual(settings.modelVariant, originalVariant)
+        guard case .error = controller.state else {
+            return XCTFail("Expected error state, got \(controller.state)")
+        }
+        XCTAssertNil(controller.pendingModelVariant)
+    }
+
+    func testSwitchModelDrivesDownloadAndLoadingStates() async {
+        let newMock = MockTranscriber()
+        newMock.progressToEmit = [0.5, 1.0]
+        let controller = makeController(transcriberFactory: { _ in newMock })
+        controller.activateForTesting()
+
+        var states: [DictationState] = []
+        let cancellable = controller.$state.sink { states.append($0) }
+        defer { cancellable.cancel() }
+
+        await controller.switchModel(to: "openai_whisper-base.en")
+
+        XCTAssertTrue(states.contains { if case .downloadingModel = $0 { return true } else { return false } })
+        XCTAssertTrue(states.contains { if case .loadingModel = $0 { return true } else { return false } })
+        XCTAssertEqual(controller.state, .idle)
+    }
 }
 
 // MARK: - Mocks
@@ -276,9 +376,18 @@ private final class MockRecorder: AudioRecording {
 private final class MockTranscriber: Transcribing {
     var result: Result<String, Error> = .success("")
     var receivedVocabulary: [String]?
+    var prepareError: Error?
+    var loadError: Error?
+    var progressToEmit: [Double] = []
 
-    func prepare(progress: @escaping (Double) -> Void) async throws {}
-    func loadModel() async throws {}
+    func prepare(progress: @escaping (Double) -> Void) async throws {
+        if let prepareError { throw prepareError }
+        for value in progressToEmit { progress(value) }
+    }
+
+    func loadModel() async throws {
+        if let loadError { throw loadError }
+    }
 
     func transcribe(_ samples: [Float], vocabulary: [String]) async throws -> String {
         receivedVocabulary = vocabulary

@@ -13,9 +13,13 @@ final class DictationController: ObservableObject {
     /// Briefly true after the user clicks Copy on the pill.
     @Published private(set) var copyConfirmed = false
 
+    /// Set while a model switch is in flight; drives the Settings row spinner.
+    @Published private(set) var pendingModelVariant: String?
+
     private let settings: SettingsStore
     private let recorder: AudioRecording
-    private let transcriber: Transcribing
+    private var transcriber: Transcribing
+    private let makeTranscriber: (String) -> Transcribing
     private let inserter: TextInserting
     private let processors: [TextProcessor]
     private let transcripts: TranscriptStore?
@@ -45,6 +49,7 @@ final class DictationController: ObservableObject {
         settings: SettingsStore = .shared,
         recorder: AudioRecording = AudioRecorder(),
         transcriber: Transcribing? = nil,
+        transcriberFactory: ((String) -> Transcribing)? = nil,
         inserter: TextInserting = TextInserter(),
         processors: [TextProcessor] = [WhitespaceCleanupProcessor()],
         hotkeyMonitor: HotkeyMonitoring? = nil,
@@ -59,7 +64,9 @@ final class DictationController: ObservableObject {
         self.dictionary = dictionary
         self.settings = settings
         self.recorder = recorder
-        self.transcriber = transcriber ?? TranscriptionService(modelVariant: settings.modelVariant)
+        let factory = transcriberFactory ?? { TranscriptionService(modelVariant: $0) }
+        self.makeTranscriber = factory
+        self.transcriber = transcriber ?? factory(settings.modelVariant)
         self.inserter = inserter
         // Dictionary replacements run after generic cleanup, snippets last:
         // a misheard word inside a trigger phrase gets corrected first, so the
@@ -127,15 +134,7 @@ final class DictationController: ObservableObject {
     func start() async {
         await waitForPermissions()
         do {
-            state = .downloadingModel(progress: 0)
-            try await transcriber.prepare { [weak self] progress in
-                Task { @MainActor in
-                    guard let self, case .downloadingModel = self.state else { return }
-                    self.state = .downloadingModel(progress: progress)
-                }
-            }
-            state = .loadingModel
-            try await transcriber.loadModel()
+            try await prepareAndLoad()
         } catch {
             state = .error("Model setup failed: \(error.localizedDescription)")
             return
@@ -148,6 +147,59 @@ final class DictationController: ObservableObject {
     /// Test seam: arms the controller without permission checks or model loading.
     func activateForTesting() {
         state = .idle
+    }
+
+    // MARK: - Model switching
+
+    /// Switching is only safe when no dictation or model setup is in flight.
+    var canSwitchModels: Bool {
+        switch state {
+        case .idle, .copyReady, .error: return true
+        default: return false
+        }
+    }
+
+    /// Downloads (if needed) and loads `variant`, persisting it only on
+    /// success. On failure the previous model is reloaded — its files are
+    /// local, so the revert works offline — and dictation keeps working.
+    func switchModel(to variant: String) async {
+        guard canSwitchModels else { return }
+        let previousVariant = settings.modelVariant
+        guard variant != previousVariant else { return }
+        pendingModelVariant = variant
+        defer { pendingModelVariant = nil }
+
+        // Replace the old service first so its WhisperKit instance is
+        // released before the new model loads (avoids 2x model memory).
+        transcriber = makeTranscriber(variant)
+        do {
+            try await prepareAndLoad()
+            settings.modelVariant = variant
+            state = .idle
+        } catch {
+            transcriber = makeTranscriber(previousVariant)
+            do {
+                try await prepareAndLoad()
+                state = .error("Couldn't switch model: \(error.localizedDescription)")
+            } catch {
+                state = .error("Model setup failed: \(error.localizedDescription)")
+            }
+            scheduleReturnToIdle()
+        }
+    }
+
+    /// Shared model-setup sequence: drives the downloading/loading states
+    /// that the sidebar, Home hero, and overlay already know how to render.
+    private func prepareAndLoad() async throws {
+        state = .downloadingModel(progress: 0)
+        try await transcriber.prepare { [weak self] progress in
+            Task { @MainActor in
+                guard let self, case .downloadingModel = self.state else { return }
+                self.state = .downloadingModel(progress: progress)
+            }
+        }
+        state = .loadingModel
+        try await transcriber.loadModel()
     }
 
     // MARK: - Permissions
