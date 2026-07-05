@@ -88,7 +88,7 @@ struct HomeView: View {
     // MARK: - Info cards
 
     private var modelDisplayName: String {
-        settings.modelVariant.contains("distil") ? "Whisper Distil Large v3" : settings.modelVariant
+        WhisperModelCatalog.displayName(for: settings.modelVariant)
     }
 
     private func infoCard(eyebrow: String, value: String) -> some View {
