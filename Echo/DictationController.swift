@@ -22,6 +22,8 @@ final class DictationController: ObservableObject {
     private let makeTranscriber: (String) -> Transcribing
     private let inserter: TextInserting
     private let processors: [TextProcessor]
+    private let captureConfiguration: CaptureConfiguration
+    private let trimmer: any AudioTrimming
     private let transcripts: TranscriptStore?
     private let usage: UsageStore?
     private let dictionary: DictionaryStore?
@@ -33,8 +35,6 @@ final class DictationController: ObservableObject {
     private var recordingStartedAt: Date?
     private var cancellables: Set<AnyCancellable> = []
 
-    /// Recordings shorter than this are treated as accidental taps.
-    private let minimumSampleCount = Int(0.3 * Double(AudioRecorder.sampleRate))
     /// Auto-stop cap so a stuck key can't record forever.
     private let maxRecordingSeconds: Double = 120
     /// How long to wait for first audio before nudging a dormant Bluetooth
@@ -58,6 +58,8 @@ final class DictationController: ObservableObject {
         usage: UsageStore? = nil,
         dictionary: DictionaryStore? = nil,
         snippets: SnippetStore? = nil,
+        captureConfiguration: CaptureConfiguration = .default,
+        trimmer: (any AudioTrimming)? = nil,
         autostart: Bool = true
     ) {
         self.transcripts = transcripts
@@ -69,6 +71,8 @@ final class DictationController: ObservableObject {
         self.makeTranscriber = factory
         self.transcriber = transcriber ?? factory(settings.modelVariant)
         self.inserter = inserter
+        self.captureConfiguration = captureConfiguration
+        self.trimmer = trimmer ?? VoiceActivityTrimmer(configuration: captureConfiguration)
         // Dictionary replacements run after generic cleanup, snippets last:
         // a misheard word inside a trigger phrase gets corrected first, so the
         // snippet still fires. Processors execute inside the main-actor
@@ -287,11 +291,23 @@ final class DictationController: ObservableObject {
         heldFor: TimeInterval,
         releasedAt: Date
     ) async {
-        let samples = captured.samples
+        let modelVariant = settings.modelVariant
         guard micReady else {
             // A quick tap before any audio arrives is just an accidental press;
             // a sustained hold with nothing captured means the mic never woke up.
             if heldFor >= 0.8 {
+                let fallback = TrimmedAudio.fallback(captured, reason: .noReliableSpeech)
+                recordUsage(
+                    words: 0,
+                    captured: captured,
+                    trimmed: fallback,
+                    trimmingDuration: 0,
+                    transcriptionDuration: nil,
+                    releasedAt: releasedAt,
+                    modelVariant: modelVariant,
+                    outcome: .noAudio,
+                    app: NSWorkspace.shared.frontmostApplication
+                )
                 state = .error("No audio from the microphone — try another input in the Echo menu")
                 scheduleReturnToIdle()
             } else {
@@ -300,20 +316,40 @@ final class DictationController: ObservableObject {
             return
         }
 
-        guard samples.count >= minimumSampleCount else {
+        guard captured.samples.count >= captureConfiguration.minimumRecordingSamples else {
             state = .idle
             return
         }
 
         state = .transcribing
-        let duration = captured.duration
+        let trimmer = self.trimmer
+        let trimmingStarted = Date()
+        let trimmed = await Task.detached(priority: .userInitiated) {
+            trimmer.trim(captured)
+        }.value
+        let trimmingDuration = Date().timeIntervalSince(trimmingStarted)
         let vocabulary = dictionary?.promptWords ?? []
+        let frontApp = NSWorkspace.shared.frontmostApplication
+        let transcriptionStarted = Date()
+
         do {
-            var text = try await transcriber.transcribe(samples, vocabulary: vocabulary)
+            var text = try await transcriber.transcribe(trimmed.samples, vocabulary: vocabulary)
+            let transcriptionDuration = Date().timeIntervalSince(transcriptionStarted)
             for processor in processors {
                 text = processor.process(text)
             }
             guard !text.isEmpty else {
+                recordUsage(
+                    words: 0,
+                    captured: captured,
+                    trimmed: trimmed,
+                    trimmingDuration: trimmingDuration,
+                    transcriptionDuration: transcriptionDuration,
+                    releasedAt: releasedAt,
+                    modelVariant: modelVariant,
+                    outcome: .emptyTranscript,
+                    app: frontApp
+                )
                 state = .idle
                 return
             }
@@ -321,21 +357,20 @@ final class DictationController: ObservableObject {
             if settings.saveHistory {
                 transcripts?.add(text)
             }
-
-            let frontApp = NSWorkspace.shared.frontmostApplication
-            let recordUsage = {
-                self.usage?.record(
-                    words: text.split(whereSeparator: \.isWhitespace).count,
-                    duration: duration,
-                    latency: Date().timeIntervalSince(releasedAt),
-                    appBundleID: frontApp?.bundleIdentifier,
-                    appName: frontApp?.localizedName
-                )
-            }
+            recordUsage(
+                words: text.split(whereSeparator: \.isWhitespace).count,
+                captured: captured,
+                trimmed: trimmed,
+                trimmingDuration: trimmingDuration,
+                transcriptionDuration: transcriptionDuration,
+                releasedAt: releasedAt,
+                modelVariant: modelVariant,
+                outcome: .success,
+                app: frontApp
+            )
 
             if inserter.hasInsertionTarget {
                 let result = inserter.insert(text)
-                recordUsage()
                 if result == .copiedToClipboard {
                     // Secure input appeared between the check and the paste.
                     offerCopy(of: text)
@@ -343,13 +378,57 @@ final class DictationController: ObservableObject {
                     state = .idle
                 }
             } else {
-                recordUsage()
                 offerCopy(of: text)
             }
         } catch {
+            recordUsage(
+                words: 0,
+                captured: captured,
+                trimmed: trimmed,
+                trimmingDuration: trimmingDuration,
+                transcriptionDuration: Date().timeIntervalSince(transcriptionStarted),
+                releasedAt: releasedAt,
+                modelVariant: modelVariant,
+                outcome: .transcriptionFailure,
+                app: frontApp
+            )
             state = .error("Transcription failed: \(error.localizedDescription)")
             scheduleReturnToIdle()
         }
+    }
+
+    private func recordUsage(
+        words: Int,
+        captured: CapturedAudio,
+        trimmed: TrimmedAudio,
+        trimmingDuration: TimeInterval,
+        transcriptionDuration: TimeInterval?,
+        releasedAt: Date,
+        modelVariant: String,
+        outcome: DictationOutcome,
+        app: NSRunningApplication?
+    ) {
+        let totalLatency = Date().timeIntervalSince(releasedAt)
+        usage?.record(
+            words: words,
+            duration: captured.duration,
+            latency: totalLatency,
+            appBundleID: app?.bundleIdentifier,
+            appName: app?.localizedName,
+            metrics: DictationOperationalMetrics(
+                rawAudioDuration: captured.duration,
+                selectedAudioDuration: Double(trimmed.samples.count) / captured.sampleRate,
+                finalizationDuration: captured.finalizationDuration,
+                trimmingDuration: trimmingDuration,
+                transcriptionDuration: transcriptionDuration,
+                totalLatency: totalLatency,
+                trimmingApplied: trimmed.trimmingApplied,
+                droppedBufferCount: captured.droppedBufferCount,
+                finalizationTimedOut: captured.finalizationTimedOut,
+                modelVariant: modelVariant,
+                outcome: outcome
+            )
+        )
     }
 
     // MARK: - Copy fallback
