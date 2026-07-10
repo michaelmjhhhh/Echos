@@ -16,6 +16,27 @@ struct AppUsage: Identifiable, Equatable {
     var id: String { bundleID }
 }
 
+enum DictationOutcome: String, Sendable, Equatable {
+    case success
+    case noAudio
+    case emptyTranscript
+    case transcriptionFailure
+}
+
+struct DictationOperationalMetrics: Sendable, Equatable {
+    let rawAudioDuration: TimeInterval
+    let selectedAudioDuration: TimeInterval
+    let finalizationDuration: TimeInterval
+    let trimmingDuration: TimeInterval
+    let transcriptionDuration: TimeInterval?
+    let totalLatency: TimeInterval
+    let trimmingApplied: Bool
+    let droppedBufferCount: Int
+    let finalizationTimedOut: Bool
+    let modelVariant: String
+    let outcome: DictationOutcome
+}
+
 /// Permanent, local-only dictation statistics in SQLite. Stores counts and
 /// timings — never transcript text — so Insights works even with history off.
 @MainActor
@@ -49,6 +70,7 @@ final class UsageStore: ObservableObject {
             );
             CREATE INDEX IF NOT EXISTS idx_dictations_created ON dictations(created_at);
             """)
+        migrateOperationalColumns()
     }
 
     deinit {
@@ -63,24 +85,40 @@ final class UsageStore: ObservableObject {
         latency: TimeInterval?,
         appBundleID: String?,
         appName: String?,
-        date: Date = Date()
+        date: Date = Date(),
+        metrics: DictationOperationalMetrics? = nil
     ) {
         guard let statement = prepare("""
-            INSERT INTO dictations (created_at, word_count, duration_seconds, latency_seconds, app_bundle_id, app_name)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO dictations (
+              created_at, word_count, duration_seconds, latency_seconds, app_bundle_id, app_name,
+              raw_audio_seconds, selected_audio_seconds, finalization_seconds, trimming_seconds,
+              transcription_seconds, total_latency_seconds, trimming_applied, conversion_drop_count,
+              finalization_timed_out, model_variant, outcome
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """) else { return }
         defer { sqlite3_finalize(statement) }
 
         sqlite3_bind_double(statement, 1, date.timeIntervalSince1970)
         sqlite3_bind_int64(statement, 2, Int64(words))
         sqlite3_bind_double(statement, 3, duration)
-        if let latency {
-            sqlite3_bind_double(statement, 4, latency)
-        } else {
-            sqlite3_bind_null(statement, 4)
-        }
+        bindDouble(statement, 4, latency)
         bindText(statement, 5, appBundleID)
         bindText(statement, 6, appName)
+        bindDouble(statement, 7, metrics?.rawAudioDuration)
+        bindDouble(statement, 8, metrics?.selectedAudioDuration)
+        bindDouble(statement, 9, metrics?.finalizationDuration)
+        bindDouble(statement, 10, metrics?.trimmingDuration)
+        bindDouble(statement, 11, metrics?.transcriptionDuration)
+        bindDouble(statement, 12, metrics?.totalLatency)
+        if let metrics {
+            sqlite3_bind_int(statement, 13, metrics.trimmingApplied ? 1 : 0)
+            sqlite3_bind_int64(statement, 14, Int64(metrics.droppedBufferCount))
+            sqlite3_bind_int(statement, 15, metrics.finalizationTimedOut ? 1 : 0)
+            bindText(statement, 16, metrics.modelVariant)
+            bindText(statement, 17, metrics.outcome.rawValue)
+        } else {
+            for index in 13...17 { sqlite3_bind_null(statement, Int32(index)) }
+        }
 
         if sqlite3_step(statement) == SQLITE_DONE {
             revision += 1
@@ -91,7 +129,7 @@ final class UsageStore: ObservableObject {
 
     func totals(now: Date = Date(), calendar: Calendar = .current) -> UsageTotals {
         var totals = UsageTotals()
-        if let statement = prepare("SELECT COALESCE(SUM(word_count), 0), COUNT(*), COUNT(DISTINCT date(created_at, 'unixepoch', 'localtime')) FROM dictations") {
+        if let statement = prepare("SELECT COALESCE(SUM(word_count), 0), COUNT(*), COUNT(DISTINCT date(created_at, 'unixepoch', 'localtime')) FROM dictations WHERE outcome IS NULL OR outcome = 'success'") {
             defer { sqlite3_finalize(statement) }
             if sqlite3_step(statement) == SQLITE_ROW {
                 totals.words = Int(sqlite3_column_int64(statement, 0))
@@ -102,7 +140,7 @@ final class UsageStore: ObservableObject {
         let monthStart = calendar.date(
             from: calendar.dateComponents([.year, .month], from: now)
         ) ?? now
-        if let statement = prepare("SELECT COALESCE(SUM(word_count), 0) FROM dictations WHERE created_at >= ?") {
+        if let statement = prepare("SELECT COALESCE(SUM(word_count), 0) FROM dictations WHERE (outcome IS NULL OR outcome = 'success') AND created_at >= ?") {
             defer { sqlite3_finalize(statement) }
             sqlite3_bind_double(statement, 1, monthStart.timeIntervalSince1970)
             if sqlite3_step(statement) == SQLITE_ROW {
@@ -117,7 +155,8 @@ final class UsageStore: ObservableObject {
         let since = now.addingTimeInterval(-Double(days) * 86_400)
         guard let statement = prepare("""
             SELECT COALESCE(SUM(word_count), 0), COALESCE(SUM(duration_seconds), 0)
-            FROM dictations WHERE created_at >= ? AND duration_seconds > 0
+            FROM dictations
+            WHERE (outcome IS NULL OR outcome = 'success') AND created_at >= ? AND duration_seconds > 0
             """) else { return 0 }
         defer { sqlite3_finalize(statement) }
         sqlite3_bind_double(statement, 1, since.timeIntervalSince1970)
@@ -131,7 +170,9 @@ final class UsageStore: ObservableObject {
     func perAppWords(limit: Int = 6) -> [AppUsage] {
         guard let statement = prepare("""
             SELECT COALESCE(app_bundle_id, 'unknown'), COALESCE(MAX(app_name), 'Unknown'), SUM(word_count) AS w
-            FROM dictations GROUP BY 1 ORDER BY w DESC LIMIT ?
+            FROM dictations
+            WHERE outcome IS NULL OR outcome = 'success'
+            GROUP BY 1 ORDER BY w DESC LIMIT ?
             """) else { return [] }
         defer { sqlite3_finalize(statement) }
         sqlite3_bind_int64(statement, 1, Int64(limit))
@@ -150,7 +191,9 @@ final class UsageStore: ObservableObject {
     func dailyWords(since: Date, calendar: Calendar = .current) -> [Date: Int] {
         guard let statement = prepare("""
             SELECT date(created_at, 'unixepoch', 'localtime') AS day, SUM(word_count)
-            FROM dictations WHERE created_at >= ? GROUP BY day
+            FROM dictations
+            WHERE (outcome IS NULL OR outcome = 'success') AND created_at >= ?
+            GROUP BY day
             """) else { return [:] }
         defer { sqlite3_finalize(statement) }
         sqlite3_bind_double(statement, 1, since.timeIntervalSince1970)
@@ -169,7 +212,67 @@ final class UsageStore: ObservableObject {
         return result
     }
 
+    #if DEBUG
+    func latestOperationalMetricsForTesting() -> DictationOperationalMetrics? {
+        guard let statement = prepare("""
+            SELECT raw_audio_seconds, selected_audio_seconds, finalization_seconds,
+                   trimming_seconds, transcription_seconds, total_latency_seconds,
+                   trimming_applied, conversion_drop_count, finalization_timed_out,
+                   model_variant, outcome
+            FROM dictations ORDER BY id DESC LIMIT 1
+            """) else { return nil }
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_step(statement) == SQLITE_ROW,
+              let model = columnText(statement, 9),
+              let outcomeText = columnText(statement, 10),
+              let outcome = DictationOutcome(rawValue: outcomeText) else { return nil }
+        return DictationOperationalMetrics(
+            rawAudioDuration: sqlite3_column_double(statement, 0),
+            selectedAudioDuration: sqlite3_column_double(statement, 1),
+            finalizationDuration: sqlite3_column_double(statement, 2),
+            trimmingDuration: sqlite3_column_double(statement, 3),
+            transcriptionDuration: sqlite3_column_type(statement, 4) == SQLITE_NULL
+                ? nil : sqlite3_column_double(statement, 4),
+            totalLatency: sqlite3_column_double(statement, 5),
+            trimmingApplied: sqlite3_column_int(statement, 6) != 0,
+            droppedBufferCount: Int(sqlite3_column_int64(statement, 7)),
+            finalizationTimedOut: sqlite3_column_int(statement, 8) != 0,
+            modelVariant: model,
+            outcome: outcome
+        )
+    }
+    #endif
+
     // MARK: - SQLite helpers
+
+    private func migrateOperationalColumns() {
+        guard let statement = prepare("PRAGMA table_info(dictations)") else { return }
+        var existing: Set<String> = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if let name = columnText(statement, 1) { existing.insert(name) }
+        }
+        sqlite3_finalize(statement)
+
+        let definitions = [
+            "raw_audio_seconds REAL",
+            "selected_audio_seconds REAL",
+            "finalization_seconds REAL",
+            "trimming_seconds REAL",
+            "transcription_seconds REAL",
+            "total_latency_seconds REAL",
+            "trimming_applied INTEGER",
+            "conversion_drop_count INTEGER",
+            "finalization_timed_out INTEGER",
+            "model_variant TEXT",
+            "outcome TEXT"
+        ]
+        for definition in definitions {
+            let name = definition.split(separator: " ", maxSplits: 1).first.map(String.init) ?? definition
+            if !existing.contains(name) {
+                exec("ALTER TABLE dictations ADD COLUMN \(definition)")
+            }
+        }
+    }
 
     private func exec(_ sql: String) {
         sqlite3_exec(db, sql, nil, nil, nil)
@@ -180,6 +283,14 @@ final class UsageStore: ObservableObject {
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return nil }
         return statement
+    }
+
+    private func bindDouble(_ statement: OpaquePointer?, _ index: Int32, _ value: Double?) {
+        if let value {
+            sqlite3_bind_double(statement, index, value)
+        } else {
+            sqlite3_bind_null(statement, index)
+        }
     }
 
     private func bindText(_ statement: OpaquePointer?, _ index: Int32, _ value: String?) {
