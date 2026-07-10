@@ -36,6 +36,7 @@ DerivedData/
 .swiftpm/
 
 # ── Tooling and editors ───────────────────────────────────
+.worktrees/
 *~
 *.swp
 *.swo
