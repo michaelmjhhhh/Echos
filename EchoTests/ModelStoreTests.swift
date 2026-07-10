@@ -90,21 +90,13 @@ final class ModelStoreTests: XCTestCase {
         let store = makeStore(downloader: gated)
 
         let first = Task { await store.download("openai_whisper-tiny.en") }
-        // Let the first download reach the gate before asking for a second.
-        var attempts = 0
-        while store.downloadProgress.isEmpty && attempts < 10_000 {
-            await Task.yield()
-            attempts += 1
-        }
-        guard !store.downloadProgress.isEmpty else {
-            gated.release()
-            return XCTFail("first download never published progress")
-        }
+        await gated.waitUntilStarted()
 
         await store.download("openai_whisper-base.en")
-        XCTAssertEqual(gated.started, ["openai_whisper-tiny.en"])
+        let started = await gated.started
+        XCTAssertEqual(started, ["openai_whisper-tiny.en"])
 
-        gated.release()
+        await gated.release()
         await first.value
         XCTAssertTrue(store.downloadProgress.isEmpty)
     }
@@ -178,17 +170,26 @@ private final class MockDownloader: ModelDownloading, @unchecked Sendable {
 }
 
 /// Blocks inside download() until released, to test the serial-download policy.
-private final class GatedDownloader: ModelDownloading, @unchecked Sendable {
+private actor GatedDownloader: ModelDownloading {
     private(set) var started: [String] = []
-    private var continuation: CheckedContinuation<Void, Never>?
+    private var downloadContinuation: CheckedContinuation<Void, Never>?
+    private var startWaiters: [CheckedContinuation<Void, Never>] = []
 
     func download(variant: String, progress: @escaping @Sendable (Double) -> Void) async throws {
         started.append(variant)
-        await withCheckedContinuation { continuation = $0 }
+        let waiters = startWaiters
+        startWaiters.removeAll()
+        waiters.forEach { $0.resume() }
+        await withCheckedContinuation { downloadContinuation = $0 }
+    }
+
+    func waitUntilStarted() async {
+        guard started.isEmpty else { return }
+        await withCheckedContinuation { startWaiters.append($0) }
     }
 
     func release() {
-        continuation?.resume()
-        continuation = nil
+        downloadContinuation?.resume()
+        downloadContinuation = nil
     }
 }
