@@ -9,7 +9,7 @@ protocol AudioRecording: AnyObject {
     var onCaptureReady: (() -> Void)? { get set }
     /// Starts capturing from the given device UID, or the system default if nil.
     func start(deviceUID: String?) throws
-    func stop() -> [Float]
+    func stop() async -> CapturedAudio
 }
 
 /// Captures microphone audio and accumulates it as 16 kHz mono Float32 samples,
@@ -20,24 +20,22 @@ protocol AudioRecording: AnyObject {
 /// re-establish and swallows the start of the next dictation. While warm, the
 /// tap keeps firing but samples are discarded until the next `start`.
 final class AudioRecorder: AudioRecording {
-    static let sampleRate: Double = 16_000
+    static let sampleRate = CaptureConfiguration.default.sampleRate
     /// How long the engine (and a Bluetooth mic's link) stays alive after a dictation.
     static let keepWarmSeconds: TimeInterval = 45
-    /// RMS above this counts as real audio; exact digital silence (a mic that
-    /// hasn't woken up, or is muted) stays below it, real room noise doesn't.
-    private static let audibleThreshold: Float = 0.0001
-
     var onLevel: ((Float) -> Void)?
     var onCaptureReady: (() -> Void)?
 
     private var engine: AVAudioEngine?
     private var engineDeviceID: AudioDeviceID = 0
     private var shutdownWorkItem: DispatchWorkItem?
+    private let configuration: CaptureConfiguration
+    private let accumulator: CaptureAccumulator
 
-    private let lock = NSLock()
-    private var samples: [Float] = []
-    private var isCapturing = false
-    private var captureReadySignaled = false
+    init(configuration: CaptureConfiguration = .default) {
+        self.configuration = configuration
+        self.accumulator = CaptureAccumulator(configuration: configuration)
+    }
 
     func start(deviceUID: String?) throws {
         shutdownWorkItem?.cancel()
@@ -63,20 +61,11 @@ final class AudioRecorder: AudioRecording {
             }
         }
 
-        lock.lock()
-        samples.removeAll()
-        captureReadySignaled = false
-        isCapturing = true
-        lock.unlock()
+        accumulator.start()
     }
 
-    func stop() -> [Float] {
-        lock.lock()
-        isCapturing = false
-        let captured = samples
-        samples = []
-        lock.unlock()
-
+    func stop() async -> CapturedAudio {
+        let captured = await accumulator.stop()
         let workItem = DispatchWorkItem { [weak self] in self?.teardownEngine() }
         shutdownWorkItem = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.keepWarmSeconds, execute: workItem)
@@ -105,8 +94,8 @@ final class AudioRecorder: AudioRecording {
         }
         guard let targetFormat = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
-            sampleRate: Self.sampleRate,
-            channels: 1,
+            sampleRate: configuration.sampleRate,
+            channels: AVAudioChannelCount(configuration.channelCount),
             interleaved: false
         ), let converter = AVAudioConverter(from: inputFormat, to: targetFormat) else {
             throw AudioRecorderError.formatConversionUnavailable
@@ -115,7 +104,11 @@ final class AudioRecorder: AudioRecording {
         // Small buffers: the final partial buffer on key-release arrives ~64 ms
         // sooner and at most ~21 ms of trailing speech stays undelivered
         // (vs ~85 ms at 4096), and the waveform level updates ~4× as often.
-        input.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { [weak self] buffer, _ in
+        input.installTap(
+            onBus: 0,
+            bufferSize: AVAudioFrameCount(configuration.tapBufferFrames),
+            format: inputFormat
+        ) { [weak self] buffer, _ in
             self?.append(buffer, using: converter, targetFormat: targetFormat)
         }
         engine.prepare()
@@ -133,9 +126,13 @@ final class AudioRecorder: AudioRecording {
     }
 
     private func append(_ buffer: AVAudioPCMBuffer, using converter: AVAudioConverter, targetFormat: AVAudioFormat) {
+        guard let token = accumulator.beginAppend() else { return }
         let ratio = targetFormat.sampleRate / buffer.format.sampleRate
         let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 16
-        guard let converted = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: capacity) else { return }
+        guard let converted = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: capacity) else {
+            rejectAppend(token)
+            return
+        }
 
         var fed = false
         var error: NSError?
@@ -148,9 +145,15 @@ final class AudioRecorder: AudioRecording {
             status.pointee = .haveData
             return buffer
         }
-        guard error == nil, let channel = converted.floatChannelData else { return }
+        guard error == nil, let channel = converted.floatChannelData else {
+            rejectAppend(token)
+            return
+        }
         let frameCount = Int(converted.frameLength)
-        guard frameCount > 0 else { return }
+        guard frameCount > 0 else {
+            rejectAppend(token)
+            return
+        }
 
         var sum: Float = 0
         for index in 0..<frameCount {
@@ -158,19 +161,23 @@ final class AudioRecorder: AudioRecording {
             sum += sample * sample
         }
         let rms = (sum / Float(frameCount)).squareRoot()
+        let pointer = UnsafeBufferPointer(start: channel[0], count: frameCount)
+        let result = accumulator.completeAppend(
+            token,
+            samples: pointer,
+            rms: rms,
+            conversionFailed: false
+        )
 
-        lock.lock()
-        guard isCapturing else {
-            lock.unlock()
-            return
+        if result.signalCaptureReady { onCaptureReady?() }
+        if result.accepted { onLevel?(min(1, rms * 6)) }
+    }
+
+    private func rejectAppend(_ token: CaptureAppendToken) {
+        let empty: [Float] = []
+        empty.withUnsafeBufferPointer {
+            _ = accumulator.completeAppend(token, samples: $0, rms: 0, conversionFailed: true)
         }
-        samples.append(contentsOf: UnsafeBufferPointer(start: channel[0], count: frameCount))
-        let signalReady = !captureReadySignaled && rms > Self.audibleThreshold
-        if signalReady { captureReadySignaled = true }
-        lock.unlock()
-
-        if signalReady { onCaptureReady?() }
-        onLevel?(min(1, rms * 6))
     }
 
     private static func defaultInputDeviceID() -> AudioDeviceID? {

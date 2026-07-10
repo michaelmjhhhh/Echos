@@ -44,6 +44,7 @@ final class DictationController: ObservableObject {
 
     /// Exposed so tests (and the UI, if ever needed) can await the in-flight transcription.
     private(set) var transcriptionTask: Task<Void, Never>?
+    private var isFinishingRecording = false
 
     init(
         settings: SettingsStore = .shared,
@@ -259,14 +260,34 @@ final class DictationController: ObservableObject {
     }
 
     private func finishRecording() {
+        guard case .recording = state, !isFinishingRecording else { return }
+        isFinishingRecording = true
         maxDurationTask?.cancel()
         maxDurationTask = nil
         micWakeTask?.cancel()
         micWakeTask = nil
-        let samples = recorder.stop()
         let heldFor = recordingStartedAt.map { Date().timeIntervalSince($0) } ?? 0
+        let releasedAt = Date()
         recordingStartedAt = nil
 
+        transcriptionTask = Task { [weak self] in
+            guard let self else { return }
+            defer { self.isFinishingRecording = false }
+            let captured = await self.recorder.stop()
+            await self.transcribeFinalizedCapture(
+                captured,
+                heldFor: heldFor,
+                releasedAt: releasedAt
+            )
+        }
+    }
+
+    private func transcribeFinalizedCapture(
+        _ captured: CapturedAudio,
+        heldFor: TimeInterval,
+        releasedAt: Date
+    ) async {
+        let samples = captured.samples
         guard micReady else {
             // A quick tap before any audio arrives is just an accidental press;
             // a sustained hold with nothing captured means the mic never woke up.
@@ -285,53 +306,49 @@ final class DictationController: ObservableObject {
         }
 
         state = .transcribing
-        let duration = Double(samples.count) / AudioRecorder.sampleRate
-        let releasedAt = Date()
+        let duration = captured.duration
         let vocabulary = dictionary?.promptWords ?? []
-        transcriptionTask = Task { [weak self] in
-            guard let self else { return }
-            do {
-                var text = try await self.transcriber.transcribe(samples, vocabulary: vocabulary)
-                for processor in self.processors {
-                    text = processor.process(text)
-                }
-                guard !text.isEmpty else {
-                    self.state = .idle
-                    return
-                }
-                self.lastTranscript = text
-                if self.settings.saveHistory {
-                    self.transcripts?.add(text)
-                }
-
-                let frontApp = NSWorkspace.shared.frontmostApplication
-                let recordUsage = {
-                    self.usage?.record(
-                        words: text.split(whereSeparator: \.isWhitespace).count,
-                        duration: duration,
-                        latency: Date().timeIntervalSince(releasedAt),
-                        appBundleID: frontApp?.bundleIdentifier,
-                        appName: frontApp?.localizedName
-                    )
-                }
-
-                if self.inserter.hasInsertionTarget {
-                    let result = self.inserter.insert(text)
-                    recordUsage()
-                    if result == .copiedToClipboard {
-                        // Secure input appeared between the check and the paste.
-                        self.offerCopy(of: text)
-                    } else {
-                        self.state = .idle
-                    }
-                } else {
-                    recordUsage()
-                    self.offerCopy(of: text)
-                }
-            } catch {
-                self.state = .error("Transcription failed: \(error.localizedDescription)")
-                self.scheduleReturnToIdle()
+        do {
+            var text = try await transcriber.transcribe(samples, vocabulary: vocabulary)
+            for processor in processors {
+                text = processor.process(text)
             }
+            guard !text.isEmpty else {
+                state = .idle
+                return
+            }
+            lastTranscript = text
+            if settings.saveHistory {
+                transcripts?.add(text)
+            }
+
+            let frontApp = NSWorkspace.shared.frontmostApplication
+            let recordUsage = {
+                self.usage?.record(
+                    words: text.split(whereSeparator: \.isWhitespace).count,
+                    duration: duration,
+                    latency: Date().timeIntervalSince(releasedAt),
+                    appBundleID: frontApp?.bundleIdentifier,
+                    appName: frontApp?.localizedName
+                )
+            }
+
+            if inserter.hasInsertionTarget {
+                let result = inserter.insert(text)
+                recordUsage()
+                if result == .copiedToClipboard {
+                    // Secure input appeared between the check and the paste.
+                    offerCopy(of: text)
+                } else {
+                    state = .idle
+                }
+            } else {
+                recordUsage()
+                offerCopy(of: text)
+            }
+        } catch {
+            state = .error("Transcription failed: \(error.localizedDescription)")
+            scheduleReturnToIdle()
         }
     }
 
