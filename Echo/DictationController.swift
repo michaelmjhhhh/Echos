@@ -328,6 +328,10 @@ final class DictationController: ObservableObject {
             trimmer.trim(captured)
         }.value
         let trimmingDuration = Date().timeIntervalSince(trimmingStarted)
+        guard trimmed.samples.count >= captureConfiguration.minimumRecordingSamples else {
+            state = .idle
+            return
+        }
         let vocabulary = dictionary?.promptWords ?? []
         let frontApp = NSWorkspace.shared.frontmostApplication
         let transcriptionStarted = Date()
@@ -357,18 +361,6 @@ final class DictationController: ObservableObject {
             if settings.saveHistory {
                 transcripts?.add(text)
             }
-            recordUsage(
-                words: text.split(whereSeparator: \.isWhitespace).count,
-                captured: captured,
-                trimmed: trimmed,
-                trimmingDuration: trimmingDuration,
-                transcriptionDuration: transcriptionDuration,
-                releasedAt: releasedAt,
-                modelVariant: modelVariant,
-                outcome: .success,
-                app: frontApp
-            )
-
             if inserter.hasInsertionTarget {
                 let result = inserter.insert(text)
                 if result == .copiedToClipboard {
@@ -380,6 +372,17 @@ final class DictationController: ObservableObject {
             } else {
                 offerCopy(of: text)
             }
+            recordUsage(
+                words: text.split(whereSeparator: \.isWhitespace).count,
+                captured: captured,
+                trimmed: trimmed,
+                trimmingDuration: trimmingDuration,
+                transcriptionDuration: transcriptionDuration,
+                releasedAt: releasedAt,
+                modelVariant: modelVariant,
+                outcome: .success,
+                app: frontApp
+            )
         } catch {
             recordUsage(
                 words: 0,

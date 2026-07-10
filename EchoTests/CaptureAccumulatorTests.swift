@@ -100,6 +100,27 @@ final class CaptureAccumulatorTests: XCTestCase {
         XCTAssertEqual(captured.samples, new)
     }
 
+    func testSecondStartWhileCapturingIsRejectedWithoutResettingSamples() async throws {
+        let accumulator = CaptureAccumulator(configuration: .default)
+        let first = accumulator.start()
+        let token = try XCTUnwrap(accumulator.beginAppend())
+        XCTAssertEqual(accumulator.start(), first)
+        let values: [Float] = [0.3]
+        values.withUnsafeBufferPointer {
+            _ = accumulator.completeAppend(token, samples: $0, rms: 0.3, conversionFailed: false)
+        }
+        let captured = await accumulator.stop()
+        XCTAssertEqual(captured.generation, first)
+        XCTAssertEqual(captured.samples, values)
+    }
+
+    func testStopWithoutActiveCaptureReturnsEmptyCapture() async {
+        let accumulator = CaptureAccumulator(configuration: .default)
+        let captured = await accumulator.stop()
+        XCTAssertTrue(captured.samples.isEmpty)
+        XCTAssertEqual(captured.generation, CaptureGeneration(rawValue: 0))
+    }
+
     func testGenerationsIncreaseAcrossCaptures() async {
         let accumulator = CaptureAccumulator(configuration: .default)
         let first = accumulator.start()

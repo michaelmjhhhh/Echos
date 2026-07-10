@@ -70,13 +70,13 @@ final class DictationControllerTests: XCTestCase {
     }
 
     func testConfidentTrimSendsSelectedSamplesToTranscriber() async {
-        let selected: [Float] = [0.4, 0.5]
+        let selected = [Float](repeating: 0.4, count: 8_000)
         let controller = makeController(trimmer: MockTrimmer { captured in
             TrimmedAudio(
                 samples: selected,
-                selectedRange: 10..<12,
-                leadingSamplesRemoved: 10,
-                trailingSamplesRemoved: captured.samples.count - 12,
+                selectedRange: 4_000..<12_000,
+                leadingSamplesRemoved: 4_000,
+                trailingSamplesRemoved: captured.samples.count - 12_000,
                 trimmingApplied: true,
                 fallbackReason: nil
             )
@@ -90,6 +90,29 @@ final class DictationControllerTests: XCTestCase {
         await controller.transcriptionTask?.value
 
         XCTAssertEqual(transcriber.receivedSamples, selected)
+    }
+
+    func testSelectedAudioBelowMinimumIsIgnored() async {
+        let controller = makeController(trimmer: MockTrimmer { captured in
+            TrimmedAudio(
+                samples: [0.4, 0.5],
+                selectedRange: 10..<12,
+                leadingSamplesRemoved: 10,
+                trailingSamplesRemoved: captured.samples.count - 12,
+                trimmingApplied: true,
+                fallbackReason: nil
+            )
+        })
+        controller.activateForTesting()
+        recorder.samplesToReturn = [Float](repeating: 0.1, count: 16_000)
+        transcriber.result = .success("must not run")
+
+        controller.hotkeyPressed()
+        controller.hotkeyReleased()
+        await controller.transcriptionTask?.value
+
+        XCTAssertNil(transcriber.receivedSamples)
+        XCTAssertEqual(controller.state, .idle)
     }
 
     func testTrimFallbackSendsOriginalSamplesToTranscriber() async {
@@ -224,6 +247,22 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertEqual(metrics?.outcome, .success)
         XCTAssertEqual(metrics!.rawAudioDuration, 2, accuracy: 0.0001)
         XCTAssertEqual(metrics?.modelVariant, usageSettings.modelVariant)
+    }
+
+    func testSuccessfulLatencyIncludesInsertionTime() async {
+        let (controller, usage) = makeControllerWithUsageStore()
+        controller.activateForTesting()
+        recorder.samplesToReturn = [Float](repeating: 0, count: 16_000)
+        transcriber.result = .success("hello")
+        inserter.insertDelay = 0.05
+
+        controller.hotkeyPressed()
+        controller.hotkeyReleased()
+        await controller.transcriptionTask?.value
+
+        let metrics = usage.latestOperationalMetricsForTesting()
+        XCTAssertNotNil(metrics)
+        XCTAssertGreaterThanOrEqual(metrics!.totalLatency, 0.05)
     }
 
     func testEmptyTranscriptRecordsOperationalOutcome() async {
@@ -555,9 +594,11 @@ private final class MockInserter: TextInserting {
     var copiedText: String?
     var hasInsertionTarget = true
     var resultToReturn: InsertionResult = .pasted
+    var insertDelay: TimeInterval = 0
 
     @discardableResult
     func insert(_ text: String) -> InsertionResult {
+        if insertDelay > 0 { Thread.sleep(forTimeInterval: insertDelay) }
         insertedText = text
         return resultToReturn
     }

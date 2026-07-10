@@ -36,7 +36,7 @@ final class CaptureAccumulator: @unchecked Sendable {
     func start() -> CaptureGeneration {
         condition.lock()
         defer { condition.unlock() }
-        precondition(phase == .idle, "Capture already active")
+        guard phase == .idle else { return generation }
         nextGeneration &+= 1
         generation = CaptureGeneration(rawValue: nextGeneration)
         samples.removeAll(keepingCapacity: true)
@@ -94,7 +94,19 @@ final class CaptureAccumulator: @unchecked Sendable {
     func stop() async -> CapturedAudio {
         let started = Date()
         condition.lock()
-        precondition(phase == .capturing, "No active capture")
+        guard phase == .capturing else {
+            let empty = CapturedAudio(
+                generation: generation,
+                samples: [],
+                convertedBufferCount: 0,
+                droppedBufferCount: 0,
+                finalizationTimedOut: false,
+                finalizationDuration: Date().timeIntervalSince(started),
+                sampleRate: configuration.sampleRate
+            )
+            condition.unlock()
+            return empty
+        }
         phase = .stopping
         let stoppingGeneration = generation
         condition.unlock()

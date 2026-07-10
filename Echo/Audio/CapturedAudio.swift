@@ -18,6 +18,7 @@ struct CapturedAudio: Sendable, Equatable {
 
 enum TrimFallbackReason: String, Sendable, Equatable {
     case emptyInput
+    case invalidInput
     case noReliableSpeech
     case speechTooShort
     case excessiveTrim

@@ -89,6 +89,16 @@ final class VoiceActivityTrimmerTests: XCTestCase {
         XCTAssertEqual(result.samples, original)
     }
 
+    func testNonFiniteSamplesFallBackWithoutTrimming() {
+        let original = frames(30, amplitude: 0.0001)
+            + [Float](repeating: .infinity, count: configuration.analysisFrameSamples * 6)
+            + frames(30, amplitude: 0.0001)
+        let result = VoiceActivityTrimmer(configuration: configuration).trim(capture(original))
+        XCTAssertEqual(result.fallbackReason, .invalidInput)
+        XCTAssertFalse(result.trimmingApplied)
+        XCTAssertEqual(result.samples, original)
+    }
+
     func testRepeatedInputProducesIdenticalOutput() {
         let original = frames(30, amplitude: 0.0001)
             + frames(25, amplitude: 0.2)

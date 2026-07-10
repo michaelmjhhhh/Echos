@@ -113,7 +113,10 @@ final class UsageStoreTests: XCTestCase {
 
         XCTAssertEqual(store.totals().dictations, 1)
         XCTAssertEqual(store.totals().words, 5)
+        XCTAssertEqual(store.averageWPM(), 150)
         XCTAssertEqual(store.perAppWords().map(\.bundleID), ["success.app"])
+        let today = Calendar.current.startOfDay(for: Date())
+        XCTAssertEqual(store.dailyWords(since: Date().addingTimeInterval(-60))[today], 5)
     }
 
     func testOperationalSchemaContainsNoContentOrDeviceColumns() {
@@ -128,10 +131,14 @@ final class UsageStoreTests: XCTestCase {
         while sqlite3_step(statement) == SQLITE_ROW {
             names.append(String(cString: sqlite3_column_text(statement, 1)))
         }
-        let forbidden: Set<String> = [
-            "transcript_text", "audio_data", "vocabulary", "input_device_uid", "microphone_name"
+        let expected: Set<String> = [
+            "id", "created_at", "word_count", "duration_seconds", "latency_seconds",
+            "app_bundle_id", "app_name", "raw_audio_seconds", "selected_audio_seconds",
+            "finalization_seconds", "trimming_seconds", "transcription_seconds",
+            "total_latency_seconds", "trimming_applied", "conversion_drop_count",
+            "finalization_timed_out", "model_variant", "outcome"
         ]
-        XCTAssertTrue(Set(names).isDisjoint(with: forbidden))
+        XCTAssertEqual(Set(names), expected)
     }
 
     func testAverageWPM() {

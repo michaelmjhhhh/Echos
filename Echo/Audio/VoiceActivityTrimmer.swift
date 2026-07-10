@@ -13,6 +13,9 @@ struct VoiceActivityTrimmer: AudioTrimming {
         guard !samples.isEmpty, frameSize > 0 else {
             return .fallback(captured, reason: .emptyInput)
         }
+        guard samples.allSatisfy(\.isFinite) else {
+            return .fallback(captured, reason: .invalidInput)
+        }
 
         let energies = stride(from: 0, to: samples.count, by: frameSize).map { start -> Float in
             let end = min(start + frameSize, samples.count)
