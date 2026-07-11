@@ -1,3 +1,4 @@
+import SQLite3
 import XCTest
 @testable import Echo
 
@@ -21,6 +22,44 @@ final class UsageStoreTests: XCTestCase {
         calendar.date(byAdding: .day, value: offset, to: reference)!
     }
 
+    private func metrics(outcome: DictationOutcome = .success) -> DictationOperationalMetrics {
+        DictationOperationalMetrics(
+            rawAudioDuration: 2,
+            selectedAudioDuration: 1.5,
+            finalizationDuration: 0.02,
+            trimmingDuration: 0.001,
+            transcriptionDuration: outcome == .transcriptionFailure ? nil : 0.45,
+            totalLatency: 0.5,
+            trimmingApplied: true,
+            droppedBufferCount: 1,
+            finalizationTimedOut: false,
+            modelVariant: "test-model",
+            outcome: outcome
+        )
+    }
+
+    private func createLegacyDatabase() {
+        try! FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(directory.appendingPathComponent("usage.sqlite").path, &db), SQLITE_OK)
+        defer { sqlite3_close(db) }
+        XCTAssertEqual(sqlite3_exec(db, """
+            CREATE TABLE dictations (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              created_at REAL NOT NULL,
+              word_count INTEGER NOT NULL,
+              duration_seconds REAL NOT NULL,
+              latency_seconds REAL,
+              app_bundle_id TEXT,
+              app_name TEXT
+            );
+            INSERT INTO dictations
+              (created_at, word_count, duration_seconds, latency_seconds, app_bundle_id, app_name)
+            VALUES
+              (strftime('%s', 'now'), 4, 2, 0.4, 'legacy.app', 'Legacy');
+            """, nil, nil, nil), SQLITE_OK)
+    }
+
     func testRecordAndTotalsPersistAcrossReload() {
         let store = UsageStore(directory: directory)
         store.record(words: 10, duration: 5, latency: 1.0, appBundleID: "com.apple.TextEdit", appName: "TextEdit")
@@ -32,6 +71,74 @@ final class UsageStoreTests: XCTestCase {
         XCTAssertEqual(totals.dictations, 2)
         XCTAssertEqual(totals.activeDays, 1)
         XCTAssertEqual(totals.wordsThisMonth, 30)
+    }
+
+    func testLegacySchemaMigratesAndPreservesTotals() {
+        createLegacyDatabase()
+        let store = UsageStore(directory: directory)
+
+        XCTAssertEqual(store.totals().dictations, 1)
+        XCTAssertEqual(store.totals().words, 4)
+        store.record(
+            words: 3,
+            duration: 2,
+            latency: 0.5,
+            appBundleID: nil,
+            appName: nil,
+            metrics: metrics()
+        )
+        XCTAssertEqual(store.totals().dictations, 2)
+        XCTAssertEqual(store.totals().words, 7)
+        XCTAssertEqual(store.latestOperationalMetricsForTesting(), metrics())
+    }
+
+    func testFailedOperationalRowsDoNotAffectInsights() {
+        let store = UsageStore(directory: directory)
+        store.record(
+            words: 5,
+            duration: 2,
+            latency: 0.5,
+            appBundleID: "success.app",
+            appName: "Success",
+            metrics: metrics()
+        )
+        store.record(
+            words: 99,
+            duration: 2,
+            latency: 0.5,
+            appBundleID: "failure.app",
+            appName: "Failure",
+            metrics: metrics(outcome: .transcriptionFailure)
+        )
+
+        XCTAssertEqual(store.totals().dictations, 1)
+        XCTAssertEqual(store.totals().words, 5)
+        XCTAssertEqual(store.averageWPM(), 150)
+        XCTAssertEqual(store.perAppWords().map(\.bundleID), ["success.app"])
+        let today = Calendar.current.startOfDay(for: Date())
+        XCTAssertEqual(store.dailyWords(since: Date().addingTimeInterval(-60))[today], 5)
+    }
+
+    func testOperationalSchemaContainsNoContentOrDeviceColumns() {
+        _ = UsageStore(directory: directory)
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(directory.appendingPathComponent("usage.sqlite").path, &db), SQLITE_OK)
+        defer { sqlite3_close(db) }
+        var statement: OpaquePointer?
+        XCTAssertEqual(sqlite3_prepare_v2(db, "PRAGMA table_info(dictations)", -1, &statement, nil), SQLITE_OK)
+        defer { sqlite3_finalize(statement) }
+        var names: [String] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            names.append(String(cString: sqlite3_column_text(statement, 1)))
+        }
+        let expected: Set<String> = [
+            "id", "created_at", "word_count", "duration_seconds", "latency_seconds",
+            "app_bundle_id", "app_name", "raw_audio_seconds", "selected_audio_seconds",
+            "finalization_seconds", "trimming_seconds", "transcription_seconds",
+            "total_latency_seconds", "trimming_applied", "conversion_drop_count",
+            "finalization_timed_out", "model_variant", "outcome"
+        ]
+        XCTAssertEqual(Set(names), expected)
     }
 
     func testAverageWPM() {

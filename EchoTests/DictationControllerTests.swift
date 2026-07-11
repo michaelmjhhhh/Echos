@@ -9,7 +9,10 @@ final class DictationControllerTests: XCTestCase {
     private var inserter: MockInserter!
     private var settings: SettingsStore!
 
-    private func makeController(transcriberFactory: ((String) -> Transcribing)? = nil) -> DictationController {
+    private func makeController(
+        transcriberFactory: ((String) -> Transcribing)? = nil,
+        trimmer: (any AudioTrimming)? = nil
+    ) -> DictationController {
         recorder = MockRecorder()
         transcriber = MockTranscriber()
         inserter = MockInserter()
@@ -22,6 +25,7 @@ final class DictationControllerTests: XCTestCase {
             transcriberFactory: transcriberFactory,
             inserter: inserter,
             hotkeyMonitor: MockHotkeyMonitor(),
+            trimmer: trimmer,
             autostart: false
         )
     }
@@ -63,6 +67,68 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertEqual(inserter.insertedText, "hello world")
         XCTAssertEqual(controller.state, .idle)
         XCTAssertEqual(controller.lastTranscript, "hello world")
+    }
+
+    func testConfidentTrimSendsSelectedSamplesToTranscriber() async {
+        let selected = [Float](repeating: 0.4, count: 8_000)
+        let controller = makeController(trimmer: MockTrimmer { captured in
+            TrimmedAudio(
+                samples: selected,
+                selectedRange: 4_000..<12_000,
+                leadingSamplesRemoved: 4_000,
+                trailingSamplesRemoved: captured.samples.count - 12_000,
+                trimmingApplied: true,
+                fallbackReason: nil
+            )
+        })
+        controller.activateForTesting()
+        recorder.samplesToReturn = [Float](repeating: 0.1, count: 16_000)
+        transcriber.result = .success("hello")
+
+        controller.hotkeyPressed()
+        controller.hotkeyReleased()
+        await controller.transcriptionTask?.value
+
+        XCTAssertEqual(transcriber.receivedSamples, selected)
+    }
+
+    func testSelectedAudioBelowMinimumIsIgnored() async {
+        let controller = makeController(trimmer: MockTrimmer { captured in
+            TrimmedAudio(
+                samples: [0.4, 0.5],
+                selectedRange: 10..<12,
+                leadingSamplesRemoved: 10,
+                trailingSamplesRemoved: captured.samples.count - 12,
+                trimmingApplied: true,
+                fallbackReason: nil
+            )
+        })
+        controller.activateForTesting()
+        recorder.samplesToReturn = [Float](repeating: 0.1, count: 16_000)
+        transcriber.result = .success("must not run")
+
+        controller.hotkeyPressed()
+        controller.hotkeyReleased()
+        await controller.transcriptionTask?.value
+
+        XCTAssertNil(transcriber.receivedSamples)
+        XCTAssertEqual(controller.state, .idle)
+    }
+
+    func testTrimFallbackSendsOriginalSamplesToTranscriber() async {
+        let original = [Float](repeating: 0.001, count: 16_000)
+        let controller = makeController(trimmer: MockTrimmer { captured in
+            .fallback(captured, reason: .noReliableSpeech)
+        })
+        controller.activateForTesting()
+        recorder.samplesToReturn = original
+        transcriber.result = .success("hello")
+
+        controller.hotkeyPressed()
+        controller.hotkeyReleased()
+        await controller.transcriptionTask?.value
+
+        XCTAssertEqual(transcriber.receivedSamples, original)
     }
 
     func testEmptyTranscriptInsertsNothing() async {
@@ -156,8 +222,9 @@ final class DictationControllerTests: XCTestCase {
         transcriber = MockTranscriber()
         inserter = MockInserter()
         let defaults = UserDefaults(suiteName: "EchoTests-\(UUID().uuidString)")!
+        let usageSettings = SettingsStore(defaults: defaults)
         let controller = DictationController(
-            settings: SettingsStore(defaults: defaults),
+            settings: usageSettings,
             recorder: recorder,
             transcriber: transcriber,
             inserter: inserter,
@@ -175,15 +242,86 @@ final class DictationControllerTests: XCTestCase {
         let totals = usage.totals()
         XCTAssertEqual(totals.dictations, 1)
         XCTAssertEqual(totals.words, 3)
+        let metrics = usage.latestOperationalMetricsForTesting()
+        XCTAssertNotNil(metrics)
+        XCTAssertEqual(metrics?.outcome, .success)
+        XCTAssertEqual(metrics!.rawAudioDuration, 2, accuracy: 0.0001)
+        XCTAssertEqual(metrics?.modelVariant, usageSettings.modelVariant)
     }
 
-    func testQuickTapWithNoAudioIsSilentlyIgnored() {
+    func testSuccessfulLatencyIncludesInsertionTime() async {
+        let (controller, usage) = makeControllerWithUsageStore()
+        controller.activateForTesting()
+        recorder.samplesToReturn = [Float](repeating: 0, count: 16_000)
+        transcriber.result = .success("hello")
+        inserter.insertDelay = 0.05
+
+        controller.hotkeyPressed()
+        controller.hotkeyReleased()
+        await controller.transcriptionTask?.value
+
+        let metrics = usage.latestOperationalMetricsForTesting()
+        XCTAssertNotNil(metrics)
+        XCTAssertGreaterThanOrEqual(metrics!.totalLatency, 0.05)
+    }
+
+    func testEmptyTranscriptRecordsOperationalOutcome() async {
+        let (controller, usage) = makeControllerWithUsageStore()
+        controller.activateForTesting()
+        recorder.samplesToReturn = [Float](repeating: 0, count: 16_000)
+        transcriber.result = .success("   ")
+
+        controller.hotkeyPressed()
+        controller.hotkeyReleased()
+        await controller.transcriptionTask?.value
+
+        XCTAssertEqual(usage.latestOperationalMetricsForTesting()?.outcome, .emptyTranscript)
+        XCTAssertEqual(usage.totals().dictations, 0)
+    }
+
+    func testTranscriptionFailureRecordsOperationalOutcome() async {
+        let (controller, usage) = makeControllerWithUsageStore()
+        controller.activateForTesting()
+        recorder.samplesToReturn = [Float](repeating: 0, count: 16_000)
+        transcriber.result = .failure(TranscriptionError.modelNotLoaded)
+
+        controller.hotkeyPressed()
+        controller.hotkeyReleased()
+        await controller.transcriptionTask?.value
+
+        XCTAssertEqual(usage.latestOperationalMetricsForTesting()?.outcome, .transcriptionFailure)
+        XCTAssertEqual(usage.totals().dictations, 0)
+    }
+
+    private func makeControllerWithUsageStore() -> (DictationController, UsageStore) {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("EchoUsage-\(UUID().uuidString)", isDirectory: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let usage = UsageStore(directory: directory)
+        recorder = MockRecorder()
+        transcriber = MockTranscriber()
+        inserter = MockInserter()
+        let defaults = UserDefaults(suiteName: "EchoTests-\(UUID().uuidString)")!
+        let controller = DictationController(
+            settings: SettingsStore(defaults: defaults),
+            recorder: recorder,
+            transcriber: transcriber,
+            inserter: inserter,
+            hotkeyMonitor: MockHotkeyMonitor(),
+            usage: usage,
+            autostart: false
+        )
+        return (controller, usage)
+    }
+
+    func testQuickTapWithNoAudioIsSilentlyIgnored() async {
         let controller = makeController()
         controller.activateForTesting()
         recorder.signalsCaptureReady = false
         recorder.samplesToReturn = []
         controller.hotkeyPressed()
         controller.hotkeyReleased()
+        await controller.transcriptionTask?.value
         XCTAssertEqual(controller.state, .idle)
         XCTAssertNil(inserter.insertedText)
     }
@@ -193,6 +331,26 @@ final class DictationControllerTests: XCTestCase {
         controller.activateForTesting()
         controller.hotkeyReleased()
         XCTAssertEqual(controller.state, .idle)
+    }
+
+    func testRepeatedReleaseWhileFinalizingStopsRecorderOnlyOnce() async {
+        let controller = makeController()
+        controller.activateForTesting()
+        recorder.samplesToReturn = [Float](repeating: 0.1, count: 16_000)
+        recorder.suspendsStop = true
+        transcriber.result = .success("hello")
+        let stopStarted = expectation(description: "stop started")
+        recorder.onStopStarted = { stopStarted.fulfill() }
+
+        controller.hotkeyPressed()
+        controller.hotkeyReleased()
+        await fulfillment(of: [stopStarted], timeout: 1)
+        controller.hotkeyReleased()
+        recorder.resumeStops()
+        await controller.transcriptionTask?.value
+
+        XCTAssertEqual(recorder.stopCallCount, 1)
+        XCTAssertEqual(inserter.insertedText, "hello")
     }
 
     // MARK: - Dictionary integration
@@ -359,6 +517,10 @@ private final class MockRecorder: AudioRecording {
     var isRecording = false
     var samplesToReturn: [Float] = []
     var signalsCaptureReady = true
+    var suspendsStop = false
+    var onStopStarted: (() -> Void)?
+    private(set) var stopCallCount = 0
+    private var stopContinuations: [CheckedContinuation<CapturedAudio, Never>] = []
     var onLevel: ((Float) -> Void)?
     var onCaptureReady: (() -> Void)?
 
@@ -367,14 +529,45 @@ private final class MockRecorder: AudioRecording {
         if signalsCaptureReady { onCaptureReady?() }
     }
 
-    func stop() -> [Float] {
+    func stop() async -> CapturedAudio {
         isRecording = false
-        return samplesToReturn
+        stopCallCount += 1
+        onStopStarted?()
+        guard suspendsStop else { return makeCapturedAudio() }
+        return await withCheckedContinuation { stopContinuations.append($0) }
+    }
+
+    func resumeStops() {
+        let captured = makeCapturedAudio()
+        let continuations = stopContinuations
+        stopContinuations.removeAll()
+        continuations.forEach { $0.resume(returning: captured) }
+    }
+
+    private func makeCapturedAudio() -> CapturedAudio {
+        CapturedAudio(
+            generation: CaptureGeneration(rawValue: UInt64(max(1, stopCallCount))),
+            samples: samplesToReturn,
+            convertedBufferCount: samplesToReturn.isEmpty ? 0 : 1,
+            droppedBufferCount: 0,
+            finalizationTimedOut: false,
+            finalizationDuration: 0.01,
+            sampleRate: CaptureConfiguration.default.sampleRate
+        )
+    }
+}
+
+private struct MockTrimmer: AudioTrimming {
+    let transform: @Sendable (CapturedAudio) -> TrimmedAudio
+
+    func trim(_ captured: CapturedAudio) -> TrimmedAudio {
+        transform(captured)
     }
 }
 
 private final class MockTranscriber: Transcribing {
     var result: Result<String, Error> = .success("")
+    var receivedSamples: [Float]?
     var receivedVocabulary: [String]?
     var prepareError: Error?
     var loadError: Error?
@@ -390,6 +583,7 @@ private final class MockTranscriber: Transcribing {
     }
 
     func transcribe(_ samples: [Float], vocabulary: [String]) async throws -> String {
+        receivedSamples = samples
         receivedVocabulary = vocabulary
         return try result.get()
     }
@@ -400,9 +594,11 @@ private final class MockInserter: TextInserting {
     var copiedText: String?
     var hasInsertionTarget = true
     var resultToReturn: InsertionResult = .pasted
+    var insertDelay: TimeInterval = 0
 
     @discardableResult
     func insert(_ text: String) -> InsertionResult {
+        if insertDelay > 0 { Thread.sleep(forTimeInterval: insertDelay) }
         insertedText = text
         return resultToReturn
     }
