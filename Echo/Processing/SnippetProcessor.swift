@@ -8,13 +8,12 @@ import Foundation
 /// Expansions are always inserted verbatim — they are literal content (emails,
 /// links, prompts), so no sentence-capitalization is ever applied.
 ///
-/// Rules arrive longest-trigger-first from `SnippetStore.rules`; like
-/// `ReplacementProcessor`, the provider is read per call on the main actor.
-struct SnippetProcessor: TextProcessor {
-    let rulesProvider: () -> [(trigger: String, expansion: String)]
+/// Rules arrive longest-trigger-first from `SnippetStore.compiledRules` and
+/// are captured as an immutable snapshot for each processing pass.
+struct SnippetProcessor: TextProcessor, Sendable {
+    let rules: [CompiledSnippetRule]
 
     func process(_ text: String) -> String {
-        let rules = rulesProvider()
         guard !rules.isEmpty else { return text }
 
         // Standalone: strip surrounding whitespace and trailing punctuation,
@@ -26,11 +25,7 @@ struct SnippetProcessor: TextProcessor {
 
         var result = text
         for rule in rules {
-            let pattern = "\\b" + NSRegularExpression.escapedPattern(for: rule.trigger) + "\\b"
-            guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
-                continue
-            }
-            let matches = regex.matches(in: result, range: NSRange(result.startIndex..., in: result))
+            let matches = rule.regex.matches(in: result, range: NSRange(result.startIndex..., in: result))
             // Replace back-to-front so earlier ranges stay valid. Manual
             // replacement (not template substitution) keeps "$" and "\" in
             // expansions literal.

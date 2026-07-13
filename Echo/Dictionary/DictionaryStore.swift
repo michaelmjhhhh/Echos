@@ -58,6 +58,7 @@ final class DictionaryStore: ObservableObject {
     nonisolated static let defaultMaxEntries = 1000
 
     @Published private(set) var entries: [DictionaryEntry] = []
+    private(set) var compiledReplacementRules: [CompiledReplacementRule] = []
     @Published var sort: DictionarySort {
         didSet { defaults.set(sort.rawValue, forKey: Self.sortKey) }
     }
@@ -78,6 +79,7 @@ final class DictionaryStore: ObservableObject {
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
         fileURL = base.appendingPathComponent("dictionary.json")
         load()
+        rebuildCompiledReplacementRules()
     }
 
     // MARK: - Mutations
@@ -96,6 +98,7 @@ final class DictionaryStore: ObservableObject {
                 dateAdded: Date()
             )
             entries.insert(entry, at: 0)
+            rebuildCompiledReplacementRules()
             save()
             return .success(entry)
         }
@@ -115,6 +118,7 @@ final class DictionaryStore: ObservableObject {
             updated.misspelling = clean.misspelling
             updated.isStarred = entry.isStarred
             entries[index] = updated
+            rebuildCompiledReplacementRules()
             save()
             return .success(updated)
         }
@@ -122,6 +126,7 @@ final class DictionaryStore: ObservableObject {
 
     func delete(_ id: UUID) {
         entries.removeAll { $0.id == id }
+        rebuildCompiledReplacementRules()
         save()
     }
 
@@ -186,6 +191,12 @@ final class DictionaryStore: ObservableObject {
         entries
             .compactMap { entry in entry.misspelling.map { ($0, entry.word) } }
             .sorted { $0.0.count > $1.0.count }
+    }
+
+    private func rebuildCompiledReplacementRules() {
+        compiledReplacementRules = replacementRules.compactMap {
+            CompiledReplacementRule(misspelling: $0.misspelling, word: $0.word)
+        }
     }
 
     // MARK: - Persistence

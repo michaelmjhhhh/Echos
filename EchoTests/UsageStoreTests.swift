@@ -29,6 +29,9 @@ final class UsageStoreTests: XCTestCase {
             finalizationDuration: 0.02,
             trimmingDuration: 0.001,
             transcriptionDuration: outcome == .transcriptionFailure ? nil : 0.45,
+            processingDuration: outcome == .transcriptionFailure ? nil : 0.012,
+            insertionDuration: outcome == .success ? 0.006 : nil,
+            historyPersistenceDuration: nil,
             totalLatency: 0.5,
             trimmingApplied: true,
             droppedBufferCount: 1,
@@ -135,6 +138,7 @@ final class UsageStoreTests: XCTestCase {
             "id", "created_at", "word_count", "duration_seconds", "latency_seconds",
             "app_bundle_id", "app_name", "raw_audio_seconds", "selected_audio_seconds",
             "finalization_seconds", "trimming_seconds", "transcription_seconds",
+            "processing_seconds", "insertion_seconds", "history_persistence_seconds",
             "total_latency_seconds", "trimming_applied", "conversion_drop_count",
             "finalization_timed_out", "model_variant", "outcome"
         ]

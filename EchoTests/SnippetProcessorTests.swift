@@ -3,7 +3,9 @@ import XCTest
 
 final class SnippetProcessorTests: XCTestCase {
     private func processor(_ rules: [(String, String)]) -> SnippetProcessor {
-        SnippetProcessor(rulesProvider: { rules.map { (trigger: $0.0, expansion: $0.1) } })
+        SnippetProcessor(rules: rules.compactMap {
+            CompiledSnippetRule(trigger: $0.0, expansion: $0.1)
+        })
     }
 
     // MARK: - Standalone utterances
@@ -92,12 +94,27 @@ final class SnippetProcessorTests: XCTestCase {
     func testDictionaryReplacementFeedsSnippetTrigger() {
         // Whisper heard "male" for "mail"; the dictionary fixes it, then the
         // snippet fires — this is why ReplacementProcessor must run first.
-        let replacement = ReplacementProcessor(rulesProvider: { [(misspelling: "male", word: "mail")] })
-        let snippet = SnippetProcessor(rulesProvider: { [(trigger: "my mail", expansion: "jhmamichael@gmail.com")] })
+        let replacement = ReplacementProcessor(rules: [
+            CompiledReplacementRule(misspelling: "male", word: "mail")!
+        ])
+        let snippet = SnippetProcessor(rules: [
+            CompiledSnippetRule(trigger: "my mail", expansion: "jhmamichael@gmail.com")!
+        ])
         let processors: [TextProcessor] = [WhitespaceCleanupProcessor(), replacement, snippet]
 
         var text = "send it to my male please"
         for processor in processors { text = processor.process(text) }
         XCTAssertEqual(text, "send it to jhmamichael@gmail.com please")
+    }
+
+    func testMaximumRuleSetPerformanceBaseline() {
+        let rules = (0..<SnippetStore.defaultMaxEntries).map {
+            ("trigger \($0)", "expansion \($0)")
+        }
+        let sut = processor(rules)
+
+        measure(metrics: [XCTClockMetric()]) {
+            XCTAssertEqual(sut.process("use trigger 999 now"), "use expansion 999 now")
+        }
     }
 }

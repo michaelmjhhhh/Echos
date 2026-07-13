@@ -27,11 +27,15 @@ final class DictationController: ObservableObject {
     private let transcripts: TranscriptStore?
     private let usage: UsageStore?
     private let dictionary: DictionaryStore?
+    private let snippets: SnippetStore?
     private var hotkeyMonitor: HotkeyMonitoring
     private var overlay: OverlayController?
     private var maxDurationTask: Task<Void, Never>?
     private var micWakeTask: Task<Void, Never>?
     private let linkWaker = AudioLinkWaker()
+    private lazy var waveformCoalescer = WaveformLevelCoalescer { [weak self] level in
+        self?.audioLevel = level
+    }
     private var recordingStartedAt: Date?
     private var cancellables: Set<AnyCancellable> = []
 
@@ -65,6 +69,7 @@ final class DictationController: ObservableObject {
         self.transcripts = transcripts
         self.usage = usage
         self.dictionary = dictionary
+        self.snippets = snippets
         self.settings = settings
         self.recorder = recorder
         let factory = transcriberFactory ?? { TranscriptionService(modelVariant: $0) }
@@ -73,29 +78,18 @@ final class DictationController: ObservableObject {
         self.inserter = inserter
         self.captureConfiguration = captureConfiguration
         self.trimmer = trimmer ?? VoiceActivityTrimmer(configuration: captureConfiguration)
-        // Dictionary replacements run after generic cleanup, snippets last:
-        // a misheard word inside a trigger phrase gets corrected first, so the
-        // snippet still fires. Processors execute inside the main-actor
-        // transcription task, so reading the stores from providers is safe.
-        var pipeline = processors
-        if let dictionary {
-            pipeline.append(ReplacementProcessor(rulesProvider: {
-                MainActor.assumeIsolated { dictionary.replacementRules }
-            }))
-        }
-        if let snippets {
-            pipeline.append(SnippetProcessor(rulesProvider: {
-                MainActor.assumeIsolated { snippets.rules }
-            }))
-        }
-        self.processors = pipeline
+        // Generic cleanup runs first. Dictionary replacement and snippet
+        // expansion use store-owned compiled snapshots at dictation time so
+        // mutations are visible without recompiling regexes per transcript.
+        self.processors = processors
         self.hotkeyMonitor = hotkeyMonitor ?? HotkeyMonitor()
 
         self.hotkeyMonitor.onKeyDown = { [weak self] in self?.hotkeyPressed() }
         self.hotkeyMonitor.onKeyUp = { [weak self] in self?.hotkeyReleased() }
 
-        self.recorder.onLevel = { [weak self] level in
-            Task { @MainActor in self?.audioLevel = level }
+        let waveformCoalescer = self.waveformCoalescer
+        self.recorder.onLevel = { level in
+            waveformCoalescer.submit(level)
         }
         self.recorder.onCaptureReady = { [weak self] in
             if Thread.isMainThread {
@@ -240,6 +234,8 @@ final class DictationController: ObservableObject {
             scheduleReturnToIdle()
             return
         }
+        waveformCoalescer.start()
+        audioLevel = 0
         recordingStartedAt = Date()
         state = .recording
         // If the mic hasn't produced audio shortly after starting, nudge the
@@ -266,6 +262,8 @@ final class DictationController: ObservableObject {
     private func finishRecording() {
         guard case .recording = state, !isFinishingRecording else { return }
         isFinishingRecording = true
+        waveformCoalescer.stop()
+        audioLevel = 0
         maxDurationTask?.cancel()
         maxDurationTask = nil
         micWakeTask?.cancel()
@@ -339,9 +337,18 @@ final class DictationController: ObservableObject {
         do {
             var text = try await transcriber.transcribe(trimmed.samples, vocabulary: vocabulary)
             let transcriptionDuration = Date().timeIntervalSince(transcriptionStarted)
+            let processingStarted = ContinuousClock.now
             for processor in processors {
                 text = processor.process(text)
             }
+            let replacementRules = dictionary?.compiledReplacementRules ?? []
+            let snippetRules = snippets?.compiledRules ?? []
+            text = await Task.detached(priority: .userInitiated) {
+                var processed = ReplacementProcessor(rules: replacementRules).process(text)
+                processed = SnippetProcessor(rules: snippetRules).process(processed)
+                return processed
+            }.value
+            let processingDuration = processingStarted.duration(to: .now).timeInterval
             guard !text.isEmpty else {
                 recordUsage(
                     words: 0,
@@ -349,6 +356,7 @@ final class DictationController: ObservableObject {
                     trimmed: trimmed,
                     trimmingDuration: trimmingDuration,
                     transcriptionDuration: transcriptionDuration,
+                    processingDuration: processingDuration,
                     releasedAt: releasedAt,
                     modelVariant: modelVariant,
                     outcome: .emptyTranscript,
@@ -358,9 +366,7 @@ final class DictationController: ObservableObject {
                 return
             }
             lastTranscript = text
-            if settings.saveHistory {
-                transcripts?.add(text)
-            }
+            let insertionStarted = ContinuousClock.now
             if inserter.hasInsertionTarget {
                 let result = inserter.insert(text)
                 if result == .copiedToClipboard {
@@ -372,12 +378,18 @@ final class DictationController: ObservableObject {
             } else {
                 offerCopy(of: text)
             }
+            let insertionDuration = insertionStarted.duration(to: .now).timeInterval
+            if settings.saveHistory {
+                transcripts?.add(text)
+            }
             recordUsage(
                 words: text.split(whereSeparator: \.isWhitespace).count,
                 captured: captured,
                 trimmed: trimmed,
                 trimmingDuration: trimmingDuration,
                 transcriptionDuration: transcriptionDuration,
+                processingDuration: processingDuration,
+                insertionDuration: insertionDuration,
                 releasedAt: releasedAt,
                 modelVariant: modelVariant,
                 outcome: .success,
@@ -406,6 +418,8 @@ final class DictationController: ObservableObject {
         trimmed: TrimmedAudio,
         trimmingDuration: TimeInterval,
         transcriptionDuration: TimeInterval?,
+        processingDuration: TimeInterval? = nil,
+        insertionDuration: TimeInterval? = nil,
         releasedAt: Date,
         modelVariant: String,
         outcome: DictationOutcome,
@@ -424,6 +438,9 @@ final class DictationController: ObservableObject {
                 finalizationDuration: captured.finalizationDuration,
                 trimmingDuration: trimmingDuration,
                 transcriptionDuration: transcriptionDuration,
+                processingDuration: processingDuration,
+                insertionDuration: insertionDuration,
+                historyPersistenceDuration: nil,
                 totalLatency: totalLatency,
                 trimmingApplied: trimmed.trimmingApplied,
                 droppedBufferCount: captured.droppedBufferCount,
@@ -466,5 +483,11 @@ final class DictationController: ObservableObject {
             self.state = .idle
         }
     }
+}
 
+private extension Duration {
+    var timeInterval: TimeInterval {
+        let components = self.components
+        return Double(components.seconds) + Double(components.attoseconds) / 1e18
+    }
 }

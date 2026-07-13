@@ -40,6 +40,7 @@ final class SnippetStore: ObservableObject {
     nonisolated static let defaultMaxEntries = 1000
 
     @Published private(set) var entries: [Snippet] = []
+    private(set) var compiledRules: [CompiledSnippetRule] = []
 
     private let fileURL: URL
     private let maxEntries: Int
@@ -52,6 +53,7 @@ final class SnippetStore: ObservableObject {
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
         fileURL = base.appendingPathComponent("snippets.json")
         load()
+        rebuildCompiledRules()
     }
 
     // MARK: - Mutations
@@ -69,6 +71,7 @@ final class SnippetStore: ObservableObject {
                 dateAdded: Date()
             )
             entries.insert(snippet, at: 0)
+            rebuildCompiledRules()
             save()
             return .success(snippet)
         }
@@ -87,6 +90,7 @@ final class SnippetStore: ObservableObject {
             updated.trigger = clean.trigger
             updated.expansion = clean.expansion
             entries[index] = updated
+            rebuildCompiledRules()
             save()
             return .success(updated)
         }
@@ -94,6 +98,7 @@ final class SnippetStore: ObservableObject {
 
     func delete(_ id: UUID) {
         entries.removeAll { $0.id == id }
+        rebuildCompiledRules()
         save()
     }
 
@@ -122,6 +127,12 @@ final class SnippetStore: ObservableObject {
         entries
             .map { (trigger: $0.trigger, expansion: $0.expansion) }
             .sorted { $0.trigger.count > $1.trigger.count }
+    }
+
+    private func rebuildCompiledRules() {
+        compiledRules = rules.compactMap {
+            CompiledSnippetRule(trigger: $0.trigger, expansion: $0.expansion)
+        }
     }
 
     // MARK: - Persistence

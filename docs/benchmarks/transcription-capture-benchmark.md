@@ -56,3 +56,16 @@ Export aggregate values only:
 - Normal finalization completes within one conversion cycle, with no unexplained timeout.
 
 Device results must be recorded before claiming real-world accuracy or latency improvement. An unrun device matrix remains an explicit release risk.
+
+## Post-transcription latency comparison
+
+Compare the commit before the post-transcription optimization with the optimized build using:
+
+- 0, 100, and 1,000 dictionary replacement rules
+- 0, 100, and 1,000 snippet rules
+- History files containing 0, 250, and 500 entries
+- Identical short, normal, and pause-heavy utterances
+
+Report p50 and p95 processing, insertion, history-persistence, and release-to-paste duration. Record waveform callbacks produced and UI updates delivered during 30-second captures. History persistence completes asynchronously and is not associated with the originating dictation row; measure the `Persist history` signpost interval in Instruments rather than delaying insertion.
+
+The optimized build passes only if p95 processor and release-to-paste duration improve at maximum rule/history size, waveform delivery stays at or below approximately 30 Hz, and inserted output remains identical. Do not claim a measured improvement until this comparison has been run.

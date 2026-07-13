@@ -128,4 +128,35 @@ final class SnippetStoreTests: XCTestCase {
         store.add(trigger: "my email signature", expansion: "Best, Michael")
         XCTAssertEqual(store.rules.map(\.trigger), ["my email signature", "my email"])
     }
+
+    func testCompiledRulesRebuildAfterAddUpdateAndDelete() throws {
+        let store = makeStore()
+        let added = try store.add(trigger: "my site", expansion: "example.com").get()
+        XCTAssertEqual(
+            SnippetProcessor(rules: store.compiledRules).process("my site"),
+            "example.com"
+        )
+
+        var edited = added
+        edited.trigger = "my website"
+        _ = store.update(edited)
+        XCTAssertEqual(
+            SnippetProcessor(rules: store.compiledRules).process("my website"),
+            "example.com"
+        )
+
+        store.delete(added.id)
+        XCTAssertTrue(store.compiledRules.isEmpty)
+    }
+
+    func testCompiledRulesAreBuiltWhenPersistedEntriesLoad() {
+        let store = makeStore()
+        store.add(trigger: "my site", expansion: "example.com")
+
+        let reloaded = makeStore()
+        XCTAssertEqual(
+            SnippetProcessor(rules: reloaded.compiledRules).process("my site"),
+            "example.com"
+        )
+    }
 }
