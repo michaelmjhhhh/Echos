@@ -73,4 +73,15 @@ final class ReplacementProcessorTests: XCTestCase {
         let sut = processor([])
         XCTAssertEqual(sut.process("unchanged text"), "unchanged text")
     }
+
+    func testMaximumRuleSetPerformanceBaseline() {
+        let rules = (0..<DictionaryStore.defaultMaxEntries).map {
+            ("term \($0)", "value \($0)")
+        }
+        let sut = processor(rules)
+
+        measure(metrics: [XCTClockMetric()]) {
+            XCTAssertEqual(sut.process("replace term 999 now"), "replace value 999 now")
+        }
+    }
 }

@@ -337,7 +337,7 @@ final class DictationController: ObservableObject {
         do {
             var text = try await transcriber.transcribe(trimmed.samples, vocabulary: vocabulary)
             let transcriptionDuration = Date().timeIntervalSince(transcriptionStarted)
-            let processingStarted = Date()
+            let processingStarted = ContinuousClock.now
             for processor in processors {
                 text = processor.process(text)
             }
@@ -348,7 +348,7 @@ final class DictationController: ObservableObject {
                 processed = SnippetProcessor(rules: snippetRules).process(processed)
                 return processed
             }.value
-            let processingDuration = Date().timeIntervalSince(processingStarted)
+            let processingDuration = processingStarted.duration(to: .now).timeInterval
             guard !text.isEmpty else {
                 recordUsage(
                     words: 0,
@@ -366,7 +366,7 @@ final class DictationController: ObservableObject {
                 return
             }
             lastTranscript = text
-            let insertionStarted = Date()
+            let insertionStarted = ContinuousClock.now
             if inserter.hasInsertionTarget {
                 let result = inserter.insert(text)
                 if result == .copiedToClipboard {
@@ -378,7 +378,7 @@ final class DictationController: ObservableObject {
             } else {
                 offerCopy(of: text)
             }
-            let insertionDuration = Date().timeIntervalSince(insertionStarted)
+            let insertionDuration = insertionStarted.duration(to: .now).timeInterval
             if settings.saveHistory {
                 transcripts?.add(text)
             }
@@ -483,5 +483,11 @@ final class DictationController: ObservableObject {
             self.state = .idle
         }
     }
+}
 
+private extension Duration {
+    var timeInterval: TimeInterval {
+        let components = self.components
+        return Double(components.seconds) + Double(components.attoseconds) / 1e18
+    }
 }

@@ -58,6 +58,29 @@ final class WaveformLevelCoalescerTests: XCTestCase {
 
         XCTAssertTrue(delivered.isEmpty)
     }
+
+    func testStopWhileDeliveryIsQueuedOnMainActorRejectsStaleLevel() async {
+        let sleeper = ControlledSleeper()
+        let deliveryGate = ControlledSleeper()
+        var delivered: [Float] = []
+        let sut = WaveformLevelCoalescer(
+            sleep: { await sleeper.sleep() },
+            beforeMainActorDelivery: { await deliveryGate.sleep() },
+            deliver: { delivered.append($0) }
+        )
+
+        sut.start()
+        sut.submit(0.8)
+        await sleeper.waitUntilSleeping()
+        await sleeper.advance()
+        await deliveryGate.waitUntilSleeping()
+
+        sut.stop()
+        await deliveryGate.advance()
+        await Task.yield()
+
+        XCTAssertTrue(delivered.isEmpty)
+    }
 }
 
 private actor ControlledSleeper {

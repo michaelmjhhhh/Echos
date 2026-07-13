@@ -7,6 +7,7 @@ final class WaveformLevelCoalescer: @unchecked Sendable {
     typealias Delivery = @MainActor @Sendable (Float) -> Void
 
     private let sleep: Sleep
+    private let beforeMainActorDelivery: Sleep
     private let deliver: Delivery
     private let lock = NSLock()
     private var generation = 0
@@ -17,9 +18,11 @@ final class WaveformLevelCoalescer: @unchecked Sendable {
     init(
         interval: Duration = .milliseconds(33),
         sleep: Sleep? = nil,
+        beforeMainActorDelivery: @escaping Sleep = {},
         deliver: @escaping Delivery
     ) {
         self.sleep = sleep ?? { try? await Task.sleep(for: interval) }
+        self.beforeMainActorDelivery = beforeMainActorDelivery
         self.deliver = deliver
     }
 
@@ -63,15 +66,17 @@ final class WaveformLevelCoalescer: @unchecked Sendable {
     }
 
     private func flush(generation scheduledGeneration: Int) async {
-        lock.lock()
-        guard active, generation == scheduledGeneration, let level = latest else {
+        await beforeMainActorDelivery()
+        await MainActor.run {
+            lock.lock()
+            guard active, generation == scheduledGeneration, let level = latest else {
+                lock.unlock()
+                return
+            }
+            latest = nil
+            deliveryScheduled = false
+            deliver(level)
             lock.unlock()
-            return
         }
-        latest = nil
-        deliveryScheduled = false
-        lock.unlock()
-
-        await deliver(level)
     }
 }

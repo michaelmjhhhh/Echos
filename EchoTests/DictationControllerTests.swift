@@ -292,6 +292,7 @@ final class DictationControllerTests: XCTestCase {
 
         XCTAssertTrue(historyWasEmptyAtInsertion)
         XCTAssertEqual(transcripts.entries.map(\.text), ["hello"])
+        await transcripts.flushPersistenceForTesting()
     }
 
     func testSuccessfulLatencyIncludesInsertionTime() async {
