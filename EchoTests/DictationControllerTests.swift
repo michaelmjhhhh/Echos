@@ -263,6 +263,11 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertNotNil(metrics)
         XCTAssertEqual(metrics?.outcome, .success)
         XCTAssertEqual(metrics!.rawAudioDuration, 2, accuracy: 0.0001)
+        XCTAssertNotNil(metrics?.processingDuration)
+        XCTAssertNotNil(metrics?.insertionDuration)
+        XCTAssertNil(metrics?.historyPersistenceDuration)
+        XCTAssertGreaterThanOrEqual(metrics?.processingDuration ?? -1, 0)
+        XCTAssertGreaterThanOrEqual(metrics?.insertionDuration ?? -1, 0)
         XCTAssertEqual(metrics?.modelVariant, usageSettings.modelVariant)
     }
 

@@ -29,6 +29,9 @@ struct DictationOperationalMetrics: Sendable, Equatable {
     let finalizationDuration: TimeInterval
     let trimmingDuration: TimeInterval
     let transcriptionDuration: TimeInterval?
+    let processingDuration: TimeInterval?
+    let insertionDuration: TimeInterval?
+    let historyPersistenceDuration: TimeInterval?
     let totalLatency: TimeInterval
     let trimmingApplied: Bool
     let droppedBufferCount: Int
@@ -92,9 +95,10 @@ final class UsageStore: ObservableObject {
             INSERT INTO dictations (
               created_at, word_count, duration_seconds, latency_seconds, app_bundle_id, app_name,
               raw_audio_seconds, selected_audio_seconds, finalization_seconds, trimming_seconds,
-              transcription_seconds, total_latency_seconds, trimming_applied, conversion_drop_count,
+              transcription_seconds, processing_seconds, insertion_seconds, history_persistence_seconds,
+              total_latency_seconds, trimming_applied, conversion_drop_count,
               finalization_timed_out, model_variant, outcome
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """) else { return }
         defer { sqlite3_finalize(statement) }
 
@@ -109,15 +113,18 @@ final class UsageStore: ObservableObject {
         bindDouble(statement, 9, metrics?.finalizationDuration)
         bindDouble(statement, 10, metrics?.trimmingDuration)
         bindDouble(statement, 11, metrics?.transcriptionDuration)
-        bindDouble(statement, 12, metrics?.totalLatency)
+        bindDouble(statement, 12, metrics?.processingDuration)
+        bindDouble(statement, 13, metrics?.insertionDuration)
+        bindDouble(statement, 14, metrics?.historyPersistenceDuration)
+        bindDouble(statement, 15, metrics?.totalLatency)
         if let metrics {
-            sqlite3_bind_int(statement, 13, metrics.trimmingApplied ? 1 : 0)
-            sqlite3_bind_int64(statement, 14, Int64(metrics.droppedBufferCount))
-            sqlite3_bind_int(statement, 15, metrics.finalizationTimedOut ? 1 : 0)
-            bindText(statement, 16, metrics.modelVariant)
-            bindText(statement, 17, metrics.outcome.rawValue)
+            sqlite3_bind_int(statement, 16, metrics.trimmingApplied ? 1 : 0)
+            sqlite3_bind_int64(statement, 17, Int64(metrics.droppedBufferCount))
+            sqlite3_bind_int(statement, 18, metrics.finalizationTimedOut ? 1 : 0)
+            bindText(statement, 19, metrics.modelVariant)
+            bindText(statement, 20, metrics.outcome.rawValue)
         } else {
-            for index in 13...17 { sqlite3_bind_null(statement, Int32(index)) }
+            for index in 16...20 { sqlite3_bind_null(statement, Int32(index)) }
         }
 
         if sqlite3_step(statement) == SQLITE_DONE {
@@ -216,15 +223,16 @@ final class UsageStore: ObservableObject {
     func latestOperationalMetricsForTesting() -> DictationOperationalMetrics? {
         guard let statement = prepare("""
             SELECT raw_audio_seconds, selected_audio_seconds, finalization_seconds,
-                   trimming_seconds, transcription_seconds, total_latency_seconds,
+                   trimming_seconds, transcription_seconds, processing_seconds,
+                   insertion_seconds, history_persistence_seconds, total_latency_seconds,
                    trimming_applied, conversion_drop_count, finalization_timed_out,
                    model_variant, outcome
             FROM dictations ORDER BY id DESC LIMIT 1
             """) else { return nil }
         defer { sqlite3_finalize(statement) }
         guard sqlite3_step(statement) == SQLITE_ROW,
-              let model = columnText(statement, 9),
-              let outcomeText = columnText(statement, 10),
+              let model = columnText(statement, 12),
+              let outcomeText = columnText(statement, 13),
               let outcome = DictationOutcome(rawValue: outcomeText) else { return nil }
         return DictationOperationalMetrics(
             rawAudioDuration: sqlite3_column_double(statement, 0),
@@ -233,10 +241,16 @@ final class UsageStore: ObservableObject {
             trimmingDuration: sqlite3_column_double(statement, 3),
             transcriptionDuration: sqlite3_column_type(statement, 4) == SQLITE_NULL
                 ? nil : sqlite3_column_double(statement, 4),
-            totalLatency: sqlite3_column_double(statement, 5),
-            trimmingApplied: sqlite3_column_int(statement, 6) != 0,
-            droppedBufferCount: Int(sqlite3_column_int64(statement, 7)),
-            finalizationTimedOut: sqlite3_column_int(statement, 8) != 0,
+            processingDuration: sqlite3_column_type(statement, 5) == SQLITE_NULL
+                ? nil : sqlite3_column_double(statement, 5),
+            insertionDuration: sqlite3_column_type(statement, 6) == SQLITE_NULL
+                ? nil : sqlite3_column_double(statement, 6),
+            historyPersistenceDuration: sqlite3_column_type(statement, 7) == SQLITE_NULL
+                ? nil : sqlite3_column_double(statement, 7),
+            totalLatency: sqlite3_column_double(statement, 8),
+            trimmingApplied: sqlite3_column_int(statement, 9) != 0,
+            droppedBufferCount: Int(sqlite3_column_int64(statement, 10)),
+            finalizationTimedOut: sqlite3_column_int(statement, 11) != 0,
             modelVariant: model,
             outcome: outcome
         )
@@ -259,6 +273,9 @@ final class UsageStore: ObservableObject {
             "finalization_seconds REAL",
             "trimming_seconds REAL",
             "transcription_seconds REAL",
+            "processing_seconds REAL",
+            "insertion_seconds REAL",
+            "history_persistence_seconds REAL",
             "total_latency_seconds REAL",
             "trimming_applied INTEGER",
             "conversion_drop_count INTEGER",

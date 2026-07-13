@@ -337,6 +337,7 @@ final class DictationController: ObservableObject {
         do {
             var text = try await transcriber.transcribe(trimmed.samples, vocabulary: vocabulary)
             let transcriptionDuration = Date().timeIntervalSince(transcriptionStarted)
+            let processingStarted = Date()
             for processor in processors {
                 text = processor.process(text)
             }
@@ -347,6 +348,7 @@ final class DictationController: ObservableObject {
                 processed = SnippetProcessor(rules: snippetRules).process(processed)
                 return processed
             }.value
+            let processingDuration = Date().timeIntervalSince(processingStarted)
             guard !text.isEmpty else {
                 recordUsage(
                     words: 0,
@@ -354,6 +356,7 @@ final class DictationController: ObservableObject {
                     trimmed: trimmed,
                     trimmingDuration: trimmingDuration,
                     transcriptionDuration: transcriptionDuration,
+                    processingDuration: processingDuration,
                     releasedAt: releasedAt,
                     modelVariant: modelVariant,
                     outcome: .emptyTranscript,
@@ -363,6 +366,7 @@ final class DictationController: ObservableObject {
                 return
             }
             lastTranscript = text
+            let insertionStarted = Date()
             if inserter.hasInsertionTarget {
                 let result = inserter.insert(text)
                 if result == .copiedToClipboard {
@@ -374,6 +378,7 @@ final class DictationController: ObservableObject {
             } else {
                 offerCopy(of: text)
             }
+            let insertionDuration = Date().timeIntervalSince(insertionStarted)
             if settings.saveHistory {
                 transcripts?.add(text)
             }
@@ -383,6 +388,8 @@ final class DictationController: ObservableObject {
                 trimmed: trimmed,
                 trimmingDuration: trimmingDuration,
                 transcriptionDuration: transcriptionDuration,
+                processingDuration: processingDuration,
+                insertionDuration: insertionDuration,
                 releasedAt: releasedAt,
                 modelVariant: modelVariant,
                 outcome: .success,
@@ -411,6 +418,8 @@ final class DictationController: ObservableObject {
         trimmed: TrimmedAudio,
         trimmingDuration: TimeInterval,
         transcriptionDuration: TimeInterval?,
+        processingDuration: TimeInterval? = nil,
+        insertionDuration: TimeInterval? = nil,
         releasedAt: Date,
         modelVariant: String,
         outcome: DictationOutcome,
@@ -429,6 +438,9 @@ final class DictationController: ObservableObject {
                 finalizationDuration: captured.finalizationDuration,
                 trimmingDuration: trimmingDuration,
                 transcriptionDuration: transcriptionDuration,
+                processingDuration: processingDuration,
+                insertionDuration: insertionDuration,
+                historyPersistenceDuration: nil,
                 totalLatency: totalLatency,
                 trimmingApplied: trimmed.trimmingApplied,
                 droppedBufferCount: captured.droppedBufferCount,
