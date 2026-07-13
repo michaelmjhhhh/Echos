@@ -4,20 +4,15 @@ import Foundation
 /// Matches whole words case-insensitively; rules arrive longest-first from
 /// `DictionaryStore.replacementRules` so overlaps resolve predictably.
 ///
-/// Rules are fetched per call: `DictationController` runs processors on the
-/// main actor, so a `{ store.replacementRules }` provider is safe there and
-/// always sees the current dictionary.
-struct ReplacementProcessor: TextProcessor {
-    let rulesProvider: () -> [(misspelling: String, word: String)]
+/// Rules are compiled when the dictionary changes and captured as an
+/// immutable snapshot for each processing pass.
+struct ReplacementProcessor: TextProcessor, Sendable {
+    let rules: [CompiledReplacementRule]
 
     func process(_ text: String) -> String {
         var result = text
-        for rule in rulesProvider() {
-            let pattern = "\\b" + NSRegularExpression.escapedPattern(for: rule.misspelling) + "\\b"
-            guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
-                continue
-            }
-            let matches = regex.matches(in: result, range: NSRange(result.startIndex..., in: result))
+        for rule in rules {
+            let matches = rule.regex.matches(in: result, range: NSRange(result.startIndex..., in: result))
             // Replace back-to-front so earlier ranges stay valid.
             for match in matches.reversed() {
                 guard let range = Range(match.range, in: result) else { continue }

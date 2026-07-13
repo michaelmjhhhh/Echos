@@ -27,6 +27,7 @@ final class DictationController: ObservableObject {
     private let transcripts: TranscriptStore?
     private let usage: UsageStore?
     private let dictionary: DictionaryStore?
+    private let snippets: SnippetStore?
     private var hotkeyMonitor: HotkeyMonitoring
     private var overlay: OverlayController?
     private var maxDurationTask: Task<Void, Never>?
@@ -65,6 +66,7 @@ final class DictationController: ObservableObject {
         self.transcripts = transcripts
         self.usage = usage
         self.dictionary = dictionary
+        self.snippets = snippets
         self.settings = settings
         self.recorder = recorder
         let factory = transcriberFactory ?? { TranscriptionService(modelVariant: $0) }
@@ -73,22 +75,10 @@ final class DictationController: ObservableObject {
         self.inserter = inserter
         self.captureConfiguration = captureConfiguration
         self.trimmer = trimmer ?? VoiceActivityTrimmer(configuration: captureConfiguration)
-        // Dictionary replacements run after generic cleanup, snippets last:
-        // a misheard word inside a trigger phrase gets corrected first, so the
-        // snippet still fires. Processors execute inside the main-actor
-        // transcription task, so reading the stores from providers is safe.
-        var pipeline = processors
-        if let dictionary {
-            pipeline.append(ReplacementProcessor(rulesProvider: {
-                MainActor.assumeIsolated { dictionary.replacementRules }
-            }))
-        }
-        if let snippets {
-            pipeline.append(SnippetProcessor(rulesProvider: {
-                MainActor.assumeIsolated { snippets.rules }
-            }))
-        }
-        self.processors = pipeline
+        // Generic cleanup runs first. Dictionary replacement and snippet
+        // expansion use store-owned compiled snapshots at dictation time so
+        // mutations are visible without recompiling regexes per transcript.
+        self.processors = processors
         self.hotkeyMonitor = hotkeyMonitor ?? HotkeyMonitor()
 
         self.hotkeyMonitor.onKeyDown = { [weak self] in self?.hotkeyPressed() }
@@ -342,6 +332,12 @@ final class DictationController: ObservableObject {
             for processor in processors {
                 text = processor.process(text)
             }
+            text = ReplacementProcessor(
+                rules: dictionary?.compiledReplacementRules ?? []
+            ).process(text)
+            text = SnippetProcessor(
+                rules: snippets?.compiledRules ?? []
+            ).process(text)
             guard !text.isEmpty else {
                 recordUsage(
                     words: 0,

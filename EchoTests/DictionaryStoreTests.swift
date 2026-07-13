@@ -182,4 +182,35 @@ final class DictionaryStoreTests: XCTestCase {
         XCTAssertEqual(store.starredCount, 1)
         XCTAssertEqual(store.replacementCount, 1)
     }
+
+    func testCompiledRulesRebuildAfterAddUpdateAndDelete() throws {
+        let store = makeStore()
+        let added = try store.add(word: "Kubernetes", misspelling: "cooper netties").get()
+        XCTAssertEqual(
+            ReplacementProcessor(rules: store.compiledReplacementRules).process("cooper netties"),
+            "Kubernetes"
+        )
+
+        var edited = added
+        edited.misspelling = "cube or netties"
+        _ = store.update(edited)
+        XCTAssertEqual(
+            ReplacementProcessor(rules: store.compiledReplacementRules).process("cube or netties"),
+            "Kubernetes"
+        )
+
+        store.delete(added.id)
+        XCTAssertTrue(store.compiledReplacementRules.isEmpty)
+    }
+
+    func testCompiledRulesAreBuiltWhenPersistedEntriesLoad() {
+        let store = makeStore()
+        store.add(word: "Kubernetes", misspelling: "cooper netties")
+
+        let reloaded = makeStore()
+        XCTAssertEqual(
+            ReplacementProcessor(rules: reloaded.compiledReplacementRules).process("cooper netties"),
+            "Kubernetes"
+        )
+    }
 }

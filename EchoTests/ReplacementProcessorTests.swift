@@ -3,7 +3,19 @@ import XCTest
 
 final class ReplacementProcessorTests: XCTestCase {
     private func processor(_ rules: [(String, String)]) -> ReplacementProcessor {
-        ReplacementProcessor(rulesProvider: { rules.map { (misspelling: $0.0, word: $0.1) } })
+        ReplacementProcessor(rules: rules.compactMap {
+            CompiledReplacementRule(misspelling: $0.0, word: $0.1)
+        })
+    }
+
+    func testRuleSnapshotDoesNotChangeAfterSourceMutation() {
+        var source = [("male", "mail")]
+        let snapshot = source.compactMap {
+            CompiledReplacementRule(misspelling: $0.0, word: $0.1)
+        }
+        let sut = ReplacementProcessor(rules: snapshot)
+        source[0] = ("male", "email")
+        XCTAssertEqual(sut.process("male"), "Mail")
     }
 
     func testReplacesWholeWordCaseInsensitively() {
