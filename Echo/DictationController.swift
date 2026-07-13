@@ -340,12 +340,13 @@ final class DictationController: ObservableObject {
             for processor in processors {
                 text = processor.process(text)
             }
-            text = ReplacementProcessor(
-                rules: dictionary?.compiledReplacementRules ?? []
-            ).process(text)
-            text = SnippetProcessor(
-                rules: snippets?.compiledRules ?? []
-            ).process(text)
+            let replacementRules = dictionary?.compiledReplacementRules ?? []
+            let snippetRules = snippets?.compiledRules ?? []
+            text = await Task.detached(priority: .userInitiated) {
+                var processed = ReplacementProcessor(rules: replacementRules).process(text)
+                processed = SnippetProcessor(rules: snippetRules).process(processed)
+                return processed
+            }.value
             guard !text.isEmpty else {
                 recordUsage(
                     words: 0,
@@ -362,9 +363,6 @@ final class DictationController: ObservableObject {
                 return
             }
             lastTranscript = text
-            if settings.saveHistory {
-                transcripts?.add(text)
-            }
             if inserter.hasInsertionTarget {
                 let result = inserter.insert(text)
                 if result == .copiedToClipboard {
@@ -375,6 +373,9 @@ final class DictationController: ObservableObject {
                 }
             } else {
                 offerCopy(of: text)
+            }
+            if settings.saveHistory {
+                transcripts?.add(text)
             }
             recordUsage(
                 words: text.split(whereSeparator: \.isWhitespace).count,

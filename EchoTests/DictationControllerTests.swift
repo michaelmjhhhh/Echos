@@ -11,7 +11,8 @@ final class DictationControllerTests: XCTestCase {
 
     private func makeController(
         transcriberFactory: ((String) -> Transcribing)? = nil,
-        trimmer: (any AudioTrimming)? = nil
+        trimmer: (any AudioTrimming)? = nil,
+        transcripts: TranscriptStore? = nil
     ) -> DictationController {
         recorder = MockRecorder()
         transcriber = MockTranscriber()
@@ -25,6 +26,7 @@ final class DictationControllerTests: XCTestCase {
             transcriberFactory: transcriberFactory,
             inserter: inserter,
             hotkeyMonitor: MockHotkeyMonitor(),
+            transcripts: transcripts,
             trimmer: trimmer,
             autostart: false
         )
@@ -262,6 +264,29 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertEqual(metrics?.outcome, .success)
         XCTAssertEqual(metrics!.rawAudioDuration, 2, accuracy: 0.0001)
         XCTAssertEqual(metrics?.modelVariant, usageSettings.modelVariant)
+    }
+
+    func testInsertionOccursBeforeVisibleHistoryMutation() async {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("EchoHistory-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let transcripts = TranscriptStore(directory: directory)
+        let controller = makeController(transcripts: transcripts)
+        settings.saveHistory = true
+        controller.activateForTesting()
+        recorder.samplesToReturn = [Float](repeating: 0.1, count: 16_000)
+        transcriber.result = .success("hello")
+        var historyWasEmptyAtInsertion = false
+        inserter.onInsert = {
+            historyWasEmptyAtInsertion = transcripts.entries.isEmpty
+        }
+
+        controller.hotkeyPressed()
+        controller.hotkeyReleased()
+        await controller.transcriptionTask?.value
+
+        XCTAssertTrue(historyWasEmptyAtInsertion)
+        XCTAssertEqual(transcripts.entries.map(\.text), ["hello"])
     }
 
     func testSuccessfulLatencyIncludesInsertionTime() async {
@@ -610,10 +635,12 @@ private final class MockInserter: TextInserting {
     var hasInsertionTarget = true
     var resultToReturn: InsertionResult = .pasted
     var insertDelay: TimeInterval = 0
+    var onInsert: (() -> Void)?
 
     @discardableResult
     func insert(_ text: String) -> InsertionResult {
         if insertDelay > 0 { Thread.sleep(forTimeInterval: insertDelay) }
+        onInsert?()
         insertedText = text
         return resultToReturn
     }
