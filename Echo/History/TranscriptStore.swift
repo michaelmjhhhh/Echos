@@ -1,6 +1,6 @@
 import Foundation
 
-struct TranscriptEntry: Identifiable, Codable, Equatable {
+struct TranscriptEntry: Identifiable, Codable, Equatable, Sendable {
     let id: UUID
     let date: Date
     let text: String
@@ -18,14 +18,23 @@ final class TranscriptStore: ObservableObject {
 
     private let fileURL: URL
     private let maxEntries: Int
+    private let persistence: any HistoryPersisting
+    private var persistenceRevision = 0
+    private var persistenceTask: Task<Void, Never>?
 
-    init(directory: URL? = nil, maxEntries: Int = 500) {
+    init(
+        directory: URL? = nil,
+        maxEntries: Int = 500,
+        persistence: (any HistoryPersisting)? = nil
+    ) {
         self.maxEntries = maxEntries
         let base = directory ?? FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Echo", isDirectory: true)
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
-        fileURL = base.appendingPathComponent("history.json")
+        let fileURL = base.appendingPathComponent("history.json")
+        self.fileURL = fileURL
+        self.persistence = persistence ?? HistoryPersistence(fileURL: fileURL)
         load()
     }
 
@@ -34,12 +43,12 @@ final class TranscriptStore: ObservableObject {
         if entries.count > maxEntries {
             entries.removeLast(entries.count - maxEntries)
         }
-        save()
+        scheduleSave()
     }
 
     func clear() {
         entries = []
-        save()
+        scheduleSave()
     }
 
     var todayEntries: [TranscriptEntry] {
@@ -50,6 +59,11 @@ final class TranscriptStore: ObservableObject {
         todayEntries.reduce(0) { $0 + $1.wordCount }
     }
 
+    func flushPersistenceForTesting() async {
+        await persistenceTask?.value
+        await persistence.flush()
+    }
+
     private func load() {
         guard let data = try? Data(contentsOf: fileURL) else { return }
         let decoder = JSONDecoder()
@@ -57,10 +71,15 @@ final class TranscriptStore: ObservableObject {
         entries = (try? decoder.decode([TranscriptEntry].self, from: data)) ?? []
     }
 
-    private func save() {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        guard let data = try? encoder.encode(entries) else { return }
-        try? data.write(to: fileURL, options: .atomic)
+    private func scheduleSave() {
+        persistenceRevision += 1
+        let revision = persistenceRevision
+        let snapshot = entries
+        let previous = persistenceTask
+        let persistence = persistence
+        persistenceTask = Task {
+            await previous?.value
+            await persistence.submit(entries: snapshot, revision: revision)
+        }
     }
 }
