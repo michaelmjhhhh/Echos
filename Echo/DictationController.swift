@@ -33,6 +33,9 @@ final class DictationController: ObservableObject {
     private var maxDurationTask: Task<Void, Never>?
     private var micWakeTask: Task<Void, Never>?
     private let linkWaker = AudioLinkWaker()
+    private lazy var waveformCoalescer = WaveformLevelCoalescer { [weak self] level in
+        self?.audioLevel = level
+    }
     private var recordingStartedAt: Date?
     private var cancellables: Set<AnyCancellable> = []
 
@@ -84,8 +87,9 @@ final class DictationController: ObservableObject {
         self.hotkeyMonitor.onKeyDown = { [weak self] in self?.hotkeyPressed() }
         self.hotkeyMonitor.onKeyUp = { [weak self] in self?.hotkeyReleased() }
 
-        self.recorder.onLevel = { [weak self] level in
-            Task { @MainActor in self?.audioLevel = level }
+        let waveformCoalescer = self.waveformCoalescer
+        self.recorder.onLevel = { level in
+            waveformCoalescer.submit(level)
         }
         self.recorder.onCaptureReady = { [weak self] in
             if Thread.isMainThread {
@@ -230,6 +234,8 @@ final class DictationController: ObservableObject {
             scheduleReturnToIdle()
             return
         }
+        waveformCoalescer.start()
+        audioLevel = 0
         recordingStartedAt = Date()
         state = .recording
         // If the mic hasn't produced audio shortly after starting, nudge the
@@ -256,6 +262,8 @@ final class DictationController: ObservableObject {
     private func finishRecording() {
         guard case .recording = state, !isFinishingRecording else { return }
         isFinishingRecording = true
+        waveformCoalescer.stop()
+        audioLevel = 0
         maxDurationTask?.cancel()
         maxDurationTask = nil
         micWakeTask?.cancel()

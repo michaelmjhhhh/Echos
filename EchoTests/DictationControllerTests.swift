@@ -45,6 +45,21 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertTrue(recorder.isRecording)
     }
 
+    func testStoppedRecordingRejectsLateWaveformLevel() async {
+        let controller = makeController()
+        controller.activateForTesting()
+        recorder.samplesToReturn = [Float](repeating: 0.1, count: 16_000)
+        controller.hotkeyPressed()
+        recorder.onLevel?(0.9)
+
+        controller.hotkeyReleased()
+        await controller.transcriptionTask?.value
+        try? await Task.sleep(for: .milliseconds(50))
+
+        XCTAssertEqual(controller.audioLevel, 0)
+        XCTAssertEqual(transcriber.receivedSamples, recorder.samplesToReturn)
+    }
+
     func testShortRecordingIsIgnored() async {
         let controller = makeController()
         controller.activateForTesting()
