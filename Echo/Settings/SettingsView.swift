@@ -65,6 +65,14 @@ struct SettingsView: View {
                             .controlSize(.small)
                     }
                     footnote("History is stored only on this Mac — nothing ever leaves it.")
+                    hairline
+                    labeledRow("Copy transcript to clipboard") {
+                        Toggle("", isOn: $settings.copyTranscriptToClipboard)
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .controlSize(.small)
+                    }
+                    footnote("The latest transcript stays on the clipboard so you can paste it again.")
                 }
 
                 settingsCard(eyebrow: "Model") {

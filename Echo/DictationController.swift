@@ -367,14 +367,22 @@ final class DictationController: ObservableObject {
             }
             lastTranscript = text
             let insertionStarted = ContinuousClock.now
+            let keepOnClipboard = settings.copyTranscriptToClipboard
             if inserter.hasInsertionTarget {
-                let result = inserter.insert(text)
+                let result = inserter.insert(text, keepOnClipboard: keepOnClipboard)
                 if result == .copiedToClipboard {
                     // Secure input appeared between the check and the paste.
-                    offerCopy(of: text)
+                    if keepOnClipboard {
+                        state = .idle
+                    } else {
+                        offerCopy(of: text)
+                    }
                 } else {
                     state = .idle
                 }
+            } else if keepOnClipboard {
+                inserter.copyToClipboard(text)
+                state = .idle
             } else {
                 offerCopy(of: text)
             }

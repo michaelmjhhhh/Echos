@@ -14,15 +14,15 @@ protocol TextInserting {
     /// Whether the frontmost app currently has somewhere to paste into.
     var hasInsertionTarget: Bool { get }
     @discardableResult
-    func insert(_ text: String) -> InsertionResult
+    func insert(_ text: String, keepOnClipboard: Bool) -> InsertionResult
     func copyToClipboard(_ text: String)
 }
 
 /// Inserts text at the cursor of the frontmost app via the clipboard:
-/// save whatever is on the pasteboard, put the transcript there, synthesize
-/// ⌘V, then restore the original pasteboard contents. Paste is the only
-/// insertion method that behaves consistently across native, Electron, and
-/// browser apps.
+/// put the transcript on the pasteboard and synthesize ⌘V. When
+/// `keepOnClipboard` is false, the previous pasteboard is restored after a
+/// short delay. Paste is the only insertion method that behaves consistently
+/// across native, Electron, and browser apps.
 /// Pure decision logic for "is there somewhere to paste?", separated from the
 /// Accessibility calls so the rules are unit-testable.
 ///
@@ -140,9 +140,9 @@ final class TextInserter: TextInserting {
     }
 
     @discardableResult
-    func insert(_ text: String) -> InsertionResult {
+    func insert(_ text: String, keepOnClipboard: Bool) -> InsertionResult {
         let pasteboard = NSPasteboard.general
-        let saved = snapshot(of: pasteboard)
+        let saved = keepOnClipboard ? [] : snapshot(of: pasteboard)
 
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
@@ -152,8 +152,10 @@ final class TextInserter: TextInserting {
         }
 
         synthesizeCommandV()
-        DispatchQueue.main.asyncAfter(deadline: .now() + restoreDelay) {
-            self.restore(saved, to: pasteboard)
+        if !keepOnClipboard {
+            DispatchQueue.main.asyncAfter(deadline: .now() + restoreDelay) {
+                self.restore(saved, to: pasteboard)
+            }
         }
         return .pasted
     }

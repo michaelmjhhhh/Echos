@@ -47,6 +47,10 @@ final class SettingsStore: ObservableObject {
     @Published var saveHistory: Bool {
         didSet { defaults.set(saveHistory, forKey: Keys.saveHistory) }
     }
+    /// Leave the latest transcript on the clipboard after dictation.
+    @Published var copyTranscriptToClipboard: Bool {
+        didSet { defaults.set(copyTranscriptToClipboard, forKey: Keys.copyTranscriptToClipboard) }
+    }
     @Published var appearance: AppAppearance {
         didSet {
             defaults.set(appearance.rawValue, forKey: Keys.appearance)
@@ -64,6 +68,7 @@ final class SettingsStore: ObservableObject {
         static let modelVariant = "modelVariant"
         static let inputDeviceUID = "inputDeviceUID"
         static let saveHistory = "saveHistory"
+        static let copyTranscriptToClipboard = "copyTranscriptToClipboard"
         static let appearance = "appearance"
     }
 
@@ -73,6 +78,7 @@ final class SettingsStore: ObservableObject {
         self.modelVariant = defaults.string(forKey: Keys.modelVariant) ?? Self.defaultModelVariant
         self.inputDeviceUID = defaults.string(forKey: Keys.inputDeviceUID)
         self.saveHistory = defaults.object(forKey: Keys.saveHistory) as? Bool ?? true
+        self.copyTranscriptToClipboard = defaults.object(forKey: Keys.copyTranscriptToClipboard) as? Bool ?? true
         self.appearance = defaults.string(forKey: Keys.appearance)
             .flatMap(AppAppearance.init(rawValue:)) ?? .system
         self.launchAtLogin = SMAppService.mainApp.status == .enabled

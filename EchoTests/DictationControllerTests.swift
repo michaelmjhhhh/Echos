@@ -174,8 +174,57 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertNil(inserter.insertedText)
     }
 
+    func testCopyTranscriptToClipboardDefaultsOn() {
+        let defaults = UserDefaults(suiteName: "EchoTests-\(UUID().uuidString)")!
+        let store = SettingsStore(defaults: defaults)
+        XCTAssertTrue(store.copyTranscriptToClipboard)
+    }
+
+    func testFullPipelineKeepsTranscriptOnClipboardByDefault() async {
+        let controller = makeController()
+        controller.activateForTesting()
+        recorder.samplesToReturn = [Float](repeating: 0, count: 16_000)
+        transcriber.result = .success("hello world")
+        controller.hotkeyPressed()
+        controller.hotkeyReleased()
+        await controller.transcriptionTask?.value
+        XCTAssertEqual(inserter.insertedText, "hello world")
+        XCTAssertEqual(inserter.lastKeepOnClipboard, true)
+        XCTAssertNil(inserter.copiedText)
+        XCTAssertEqual(controller.state, .idle)
+    }
+
+    func testCopyToClipboardOffRestoresPreviousClipboardOnPaste() async {
+        let controller = makeController()
+        settings.copyTranscriptToClipboard = false
+        controller.activateForTesting()
+        recorder.samplesToReturn = [Float](repeating: 0, count: 16_000)
+        transcriber.result = .success("hello world")
+        controller.hotkeyPressed()
+        controller.hotkeyReleased()
+        await controller.transcriptionTask?.value
+        XCTAssertEqual(inserter.insertedText, "hello world")
+        XCTAssertEqual(inserter.lastKeepOnClipboard, false)
+        XCTAssertEqual(controller.state, .idle)
+    }
+
+    func testNoInsertionTargetCopiesWhenSettingOn() async {
+        let controller = makeController()
+        controller.activateForTesting()
+        recorder.samplesToReturn = [Float](repeating: 0, count: 16_000)
+        transcriber.result = .success("hello world")
+        inserter.hasInsertionTarget = false
+        controller.hotkeyPressed()
+        controller.hotkeyReleased()
+        await controller.transcriptionTask?.value
+        XCTAssertEqual(controller.state, .idle)
+        XCTAssertEqual(inserter.copiedText, "hello world")
+        XCTAssertNil(inserter.insertedText)
+    }
+
     func testNoInsertionTargetOffersCopyInsteadOfPasting() async {
         let controller = makeController()
+        settings.copyTranscriptToClipboard = false
         controller.activateForTesting()
         recorder.samplesToReturn = [Float](repeating: 0, count: 16_000)
         transcriber.result = .success("hello world")
@@ -189,6 +238,7 @@ final class DictationControllerTests: XCTestCase {
 
     func testCopyTranscriptCopiesText() async {
         let controller = makeController()
+        settings.copyTranscriptToClipboard = false
         controller.activateForTesting()
         recorder.samplesToReturn = [Float](repeating: 0, count: 16_000)
         transcriber.result = .success("hello world")
@@ -202,8 +252,22 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertTrue(controller.copyConfirmed)
     }
 
+    func testSecureInputCopiesWhenSettingOn() async {
+        let controller = makeController()
+        controller.activateForTesting()
+        recorder.samplesToReturn = [Float](repeating: 0, count: 16_000)
+        transcriber.result = .success("hello")
+        inserter.resultToReturn = .copiedToClipboard
+        controller.hotkeyPressed()
+        controller.hotkeyReleased()
+        await controller.transcriptionTask?.value
+        XCTAssertEqual(controller.state, .idle)
+        XCTAssertEqual(inserter.lastKeepOnClipboard, true)
+    }
+
     func testSecureInputBackstopOffersCopy() async {
         let controller = makeController()
+        settings.copyTranscriptToClipboard = false
         controller.activateForTesting()
         recorder.samplesToReturn = [Float](repeating: 0, count: 16_000)
         transcriber.result = .success("hello")
@@ -216,6 +280,7 @@ final class DictationControllerTests: XCTestCase {
 
     func testNewDictationSupersedesCopyOffer() async {
         let controller = makeController()
+        settings.copyTranscriptToClipboard = false
         controller.activateForTesting()
         recorder.samplesToReturn = [Float](repeating: 0, count: 16_000)
         transcriber.result = .success("first")
@@ -638,16 +703,18 @@ private final class MockTranscriber: Transcribing {
 private final class MockInserter: TextInserting {
     var insertedText: String?
     var copiedText: String?
+    var lastKeepOnClipboard: Bool?
     var hasInsertionTarget = true
     var resultToReturn: InsertionResult = .pasted
     var insertDelay: TimeInterval = 0
     var onInsert: (() -> Void)?
 
     @discardableResult
-    func insert(_ text: String) -> InsertionResult {
+    func insert(_ text: String, keepOnClipboard: Bool) -> InsertionResult {
         if insertDelay > 0 { Thread.sleep(forTimeInterval: insertDelay) }
         onInsert?()
         insertedText = text
+        lastKeepOnClipboard = keepOnClipboard
         return resultToReturn
     }
 

@@ -38,11 +38,11 @@ First launch:
 ```
 Right ⌥ held ──► AVAudioEngine (16 kHz mono) ──► WhisperKit (distil-large-v3, on-device)
                                                        │
-cursor ◄── ⌘V paste (clipboard saved & restored) ◄── TextProcessor chain
+cursor ◄── ⌘V paste (transcript left on clipboard) ◄── TextProcessor chain
 ```
 
 - **Hotkey:** configurable in Settings (Right ⌥ / Right ⌘ / Fn).
-- **Insertion:** clipboard paste with save/restore — the only method that works reliably across native, Electron, and browser apps. If a password field has focus (secure input), Echo leaves the transcript on the clipboard instead.
+- **Insertion:** clipboard paste — the only method that works reliably across native, Electron, and browser apps. By default the transcript stays on the clipboard so you can paste it again; turn **Copy transcript to clipboard** off in Settings to restore the previous clipboard after paste. If a password field has focus and that setting is off, Echo offers a Copy pill instead.
 - **TextProcessor pipeline:** raw Whisper text flows through cleanup stages before insertion; this is the hook for a future local-LLM formatting pass.
 - **Snippets:** save text you type often (an email, link, or prompt) with a trigger phrase; say the trigger — alone or mid-sentence — and Echo inserts the saved text instead. Matching is case-insensitive; expansions are inserted verbatim.
 
