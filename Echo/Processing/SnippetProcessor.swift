@@ -1,47 +1,40 @@
 import Foundation
 
-/// Expands snippet triggers into their saved text. Two matching modes,
-/// mirroring Wispr Flow:
-///  - Standalone: the whole utterance is just the trigger (Whisper may append
-///    punctuation) — the entire transcript becomes the expansion.
-///  - Mid-sentence: triggers match as whole words, case-insensitively.
-/// Expansions are always inserted verbatim — they are literal content (emails,
-/// links, prompts), so no sentence-capitalization is ever applied.
-///
-/// Rules arrive longest-trigger-first from `SnippetStore.compiledRules` and
-/// are captured as an immutable snapshot for each processing pass.
+/// Dictionary processing may intentionally produce a snippet trigger. Expansions are
+/// opaque within this final stage, including literal whitespace, dollars and backslashes.
 struct SnippetProcessor: TextProcessor, Sendable {
     let rules: [CompiledSnippetRule]
+    var literalMode = false
 
     func process(_ text: String) -> String {
-        guard !rules.isEmpty else { return text }
-
-        // Standalone: strip surrounding whitespace and trailing punctuation,
-        // then compare against each trigger whole.
-        let standalone = standaloneCandidate(text)
-        for rule in rules where standalone.caseInsensitiveCompare(rule.trigger) == .orderedSame {
-            return rule.expansion
-        }
-
-        var result = text
-        for rule in rules {
-            let matches = rule.regex.matches(in: result, range: NSRange(result.startIndex..., in: result))
-            // Replace back-to-front so earlier ranges stay valid. Manual
-            // replacement (not template substitution) keeps "$" and "\" in
-            // expansions literal.
-            for match in matches.reversed() {
-                guard let range = Range(match.range, in: result) else { continue }
-                result.replaceSubrange(range, with: rule.expansion)
+        guard !literalMode, !rules.isEmpty else { return text }
+        let source = TextRuleMatcher.normalized(text)
+        let protected = TextRuleMatcher.protectedRanges(in: source)
+        let trimmed = source.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Check the complete trigger first, so punctuation in C++, .NET, etc. is literal.
+        var candidate = trimmed
+        while !candidate.isEmpty {
+            for rule in rules {
+                if TextRuleMatcher.key(candidate) == TextRuleMatcher.key(rule.trigger),
+                   rule.allowProtectedText || protected.isEmpty,
+                   rule.expansion.utf16.count <= TextRuleMatcher.maximumOutputUTF16Count {
+                    return rule.expansion
+                }
             }
+            guard let last = candidate.last, ".!?。！？,，;；:：".contains(last) else { break }
+            candidate.removeLast()
+            candidate = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
         }
-        return result
-    }
-
-    private func standaloneCandidate(_ text: String) -> String {
-        var candidate = Substring(text.trimmingCharacters(in: .whitespacesAndNewlines))
-        while let last = candidate.last, last.isPunctuation {
-            candidate = candidate.dropLast()
+        var edits: [TextRuleMatcher.Edit] = []
+        for (priority, rule) in rules.enumerated() where !rule.standaloneOnly {
+            guard !Task<Never, Never>.isCancelled else { return text }
+            rule.regex.enumerateMatches(in: source, range: NSRange(source.startIndex..., in: source)) { match, _, stop in
+                guard edits.count < TextRuleMatcher.maximumMatches else { stop.pointee = true; return }
+                guard let match, rule.allowProtectedText || !TextRuleMatcher.isProtected(match.range, ranges: protected) else { return }
+                edits.append(.init(range: match.range, replacement: rule.expansion, priority: priority))
+            }
+            if edits.count >= TextRuleMatcher.maximumMatches { break }
         }
-        return candidate.trimmingCharacters(in: .whitespaces)
+        return TextRuleMatcher.apply(edits, to: source)
     }
 }

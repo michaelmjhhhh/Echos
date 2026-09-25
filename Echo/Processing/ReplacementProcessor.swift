@@ -1,30 +1,33 @@
 import Foundation
 
-/// Applies the dictionary's misspelling → word rules to a transcript.
-/// Matches whole words case-insensitively; rules arrive longest-first from
-/// `DictionaryStore.replacementRules` so overlaps resolve predictably.
-///
-/// Rules are compiled when the dictionary changes and captured as an
-/// immutable snapshot for each processing pass.
 struct ReplacementProcessor: TextProcessor, Sendable {
     let rules: [CompiledReplacementRule]
+    var literalMode = false
 
     func process(_ text: String) -> String {
-        var result = text
-        for rule in rules {
-            let matches = rule.regex.matches(in: result, range: NSRange(result.startIndex..., in: result))
-            // Replace back-to-front so earlier ranges stay valid.
-            for match in matches.reversed() {
-                guard let range = Range(match.range, in: result) else { continue }
-                result.replaceSubrange(range, with: replacement(for: rule.word, at: range, in: result))
+        guard !literalMode, !rules.isEmpty else { return text }
+        let source = TextRuleMatcher.normalized(text)
+        let protected = TextRuleMatcher.protectedRanges(in: source)
+        let strictProtected = TextRuleMatcher.protectedRanges(in: source, includeBareDomains: false)
+        var edits: [TextRuleMatcher.Edit] = []
+        for (priority, rule) in rules.enumerated() {
+            guard !Task<Never, Never>.isCancelled else { return text }
+            // Node.js-style case normalization is safe in a bare domain-shaped name;
+            // explicit URLs, email and code still remain protected.
+            let isCaseOnlyName = TextRuleMatcher.key(rule.misspelling) == TextRuleMatcher.key(rule.word)
+                && !rule.misspelling.contains(where: { "/:?#".contains($0) })
+            let protectedForRule = isCaseOnlyName ? strictProtected : protected
+            rule.regex.enumerateMatches(in: source, range: NSRange(source.startIndex..., in: source)) { match, _, stop in
+                guard edits.count < TextRuleMatcher.maximumMatches else { stop.pointee = true; return }
+                guard let match, rule.allowProtectedText || !TextRuleMatcher.isProtected(match.range, ranges: protectedForRule),
+                      let range = Range(match.range, in: source) else { return }
+                edits.append(.init(range: match.range, replacement: replacement(for: rule.word, at: range, in: source), priority: priority))
             }
+            if edits.count >= TextRuleMatcher.maximumMatches { break }
         }
-        return result
+        return TextRuleMatcher.apply(edits, to: source)
     }
 
-    /// The stored spelling, except sentence starts re-capitalize all-lowercase
-    /// words ("recieve → receive" must not decapitalize "Receive my thanks.").
-    /// Mixed-case words ("iPhone") are always inserted verbatim.
     private func replacement(for word: String, at range: Range<String.Index>, in text: String) -> String {
         guard word == word.lowercased(), isSentenceStart(range.lowerBound, in: text) else { return word }
         return word.prefix(1).uppercased() + word.dropFirst()
@@ -35,9 +38,9 @@ struct ReplacementProcessor: TextProcessor, Sendable {
         while index > text.startIndex {
             index = text.index(before: index)
             let character = text[index]
-            if character.isWhitespace || character == "\"" || character == "“" { continue }
-            return ".!?".contains(character)
+            if character.isWhitespace || "\"“‘(".contains(character) { continue }
+            return ".!?。！？".contains(character)
         }
-        return true // start of the transcript
+        return true
     }
 }
