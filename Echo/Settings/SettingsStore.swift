@@ -31,7 +31,7 @@ final class SettingsStore: ObservableObject {
     static let shared = SettingsStore()
 
     /// English-optimized Whisper variant from argmaxinc/whisperkit-coreml (~600 MB).
-    static let defaultModelVariant = "distil-whisper_distil-large-v3_594MB"
+    nonisolated static let defaultModelVariant = "distil-whisper_distil-large-v3_594MB"
 
     @Published var hotkey: Hotkey {
         didSet { defaults.set(hotkey.rawValue, forKey: Keys.hotkey) }
@@ -51,6 +51,28 @@ final class SettingsStore: ObservableObject {
     @Published var copyTranscriptToClipboard: Bool {
         didSet { defaults.set(copyTranscriptToClipboard, forKey: Keys.copyTranscriptToClipboard) }
     }
+    @Published var transcriptionLanguage: String {
+        didSet { defaults.set(transcriptionLanguage, forKey: Keys.transcriptionLanguage) }
+    }
+    @Published var vocabularyTokenBudget: Int {
+        didSet { defaults.set(vocabularyTokenBudget, forKey: Keys.vocabularyTokenBudget) }
+    }
+    @Published var decodingFallbackCount: Int {
+        didSet { defaults.set(decodingFallbackCount, forKey: Keys.decodingFallbackCount) }
+    }
+    @Published var expandSnippets: Bool {
+        didSet { defaults.set(expandSnippets, forKey: Keys.expandSnippets) }
+    }
+    @Published var saveUsageStatistics: Bool {
+        didSet { defaults.set(saveUsageStatistics, forKey: Keys.saveUsageStatistics) }
+    }
+    /// Zero keeps usage until explicitly cleared; independent of transcript history.
+    @Published var usageRetentionDays: Int {
+        didSet { defaults.set(usageRetentionDays, forKey: Keys.usageRetentionDays) }
+    }
+    @Published private(set) var launchAtLoginError: String?
+    private var refreshingLoginStatus = false
+
     @Published var appearance: AppAppearance {
         didSet {
             defaults.set(appearance.rawValue, forKey: Keys.appearance)
@@ -58,7 +80,7 @@ final class SettingsStore: ObservableObject {
         }
     }
     @Published var launchAtLogin: Bool {
-        didSet { updateLaunchAtLogin() }
+        didSet { if !refreshingLoginStatus { updateLaunchAtLogin() } }
     }
 
     private let defaults: UserDefaults
@@ -70,15 +92,33 @@ final class SettingsStore: ObservableObject {
         static let saveHistory = "saveHistory"
         static let copyTranscriptToClipboard = "copyTranscriptToClipboard"
         static let appearance = "appearance"
+        static let transcriptionLanguage = "transcriptionLanguage"
+        static let vocabularyTokenBudget = "vocabularyTokenBudget"
+        static let decodingFallbackCount = "decodingFallbackCount"
+        static let expandSnippets = "expandSnippets"
+        static let saveUsageStatistics = "saveUsageStatistics"
+        static let usageRetentionDays = "usageRetentionDays"
     }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         self.hotkey = defaults.string(forKey: Keys.hotkey).flatMap(Hotkey.init(rawValue:)) ?? .rightOption
         self.modelVariant = defaults.string(forKey: Keys.modelVariant) ?? Self.defaultModelVariant
-        self.inputDeviceUID = defaults.string(forKey: Keys.inputDeviceUID)
+        let savedInput = defaults.string(forKey: Keys.inputDeviceUID)
+        if let savedInput, AudioInputDevices.isTransientSelection(uid: savedInput) {
+            self.inputDeviceUID = nil
+            defaults.removeObject(forKey: Keys.inputDeviceUID)
+        } else {
+            self.inputDeviceUID = savedInput
+        }
         self.saveHistory = defaults.object(forKey: Keys.saveHistory) as? Bool ?? true
         self.copyTranscriptToClipboard = defaults.object(forKey: Keys.copyTranscriptToClipboard) as? Bool ?? true
+        self.transcriptionLanguage = defaults.string(forKey: Keys.transcriptionLanguage) ?? "en"
+        self.vocabularyTokenBudget = min(200, max(0, defaults.object(forKey: Keys.vocabularyTokenBudget) as? Int ?? 200))
+        self.decodingFallbackCount = min(5, max(0, defaults.object(forKey: Keys.decodingFallbackCount) as? Int ?? 5))
+        self.expandSnippets = defaults.object(forKey: Keys.expandSnippets) as? Bool ?? true
+        self.saveUsageStatistics = defaults.object(forKey: Keys.saveUsageStatistics) as? Bool ?? true
+        self.usageRetentionDays = max(0, defaults.object(forKey: Keys.usageRetentionDays) as? Int ?? 0)
         self.appearance = defaults.string(forKey: Keys.appearance)
             .flatMap(AppAppearance.init(rawValue:)) ?? .system
         self.launchAtLogin = SMAppService.mainApp.status == .enabled
@@ -89,6 +129,15 @@ final class SettingsStore: ObservableObject {
         NSApp?.appearance = appearance.nsAppearance
     }
 
+    func refreshLaunchAtLoginStatus() {
+        refreshingLoginStatus = true
+        launchAtLogin = SMAppService.mainApp.status == .enabled
+        refreshingLoginStatus = false
+        if SMAppService.mainApp.status == .requiresApproval {
+            launchAtLoginError = "Allow Echo in System Settings → General → Login Items."
+        }
+    }
+
     private func updateLaunchAtLogin() {
         do {
             if launchAtLogin {
@@ -96,9 +145,10 @@ final class SettingsStore: ObservableObject {
             } else {
                 try SMAppService.mainApp.unregister()
             }
+            launchAtLoginError = nil
         } catch {
-            // Revert the toggle if the system call failed.
-            launchAtLogin = SMAppService.mainApp.status == .enabled
+            launchAtLoginError = error.localizedDescription
         }
+        refreshLaunchAtLoginStatus()
     }
 }

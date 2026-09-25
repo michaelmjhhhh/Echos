@@ -7,8 +7,14 @@ struct TranscriptRow: View {
     let entry: TranscriptEntry
     var compact = false
 
+    @EnvironmentObject private var transcripts: TranscriptStore
+    @State private var showingDetail = false
+    @State private var correctingAfterDetail = false
+    @State private var confirmingDelete = false
+    @State private var copyFeedbackTask: Task<Void, Never>?
     @State private var isHovering = false
     @State private var justCopied = false
+    @State private var copyFailed = false
     @State private var addingToDictionary = false
     @FocusState private var copyFocused: Bool
 
@@ -32,8 +38,11 @@ struct TranscriptRow: View {
             Spacer(minLength: 0)
             // Visible on hover, when keyboard focus lands on it, and while
             // confirming — never hidden from keyboard users.
-            copyButton
-                .opacity(isHovering || justCopied || copyFocused ? 1 : 0)
+            VStack(alignment: .trailing, spacing: Spacing.xs) {
+                copyButton
+                Button("Open") { showingDetail = true }.buttonStyle(EchoPressButtonStyle()).font(.echo(11))
+                    .accessibilityLabel("Open full transcript")
+            }
         }
         .padding(Spacing.s)
         .background(
@@ -50,41 +59,102 @@ struct TranscriptRow: View {
         .contextMenu {
             Button("Copy") { copy() }
             // Spotted a word Echo got wrong? Add the right spelling from here.
-            Button("Add to Dictionary…") { addingToDictionary = true }
+            Button("Correct a word…") { addingToDictionary = true }
+            Button("Open full transcript") { showingDetail = true }
+            Button("Delete transcript", role: .destructive) { confirmingDelete = true }
         }
         .sheet(isPresented: $addingToDictionary) {
-            DictionaryEditorSheet(entry: nil)
+            DictionaryEditorSheet(entry: nil, sourceTranscript: entry.text)
         }
-        .accessibilityElement(children: .combine)
+        .sheet(isPresented: $showingDetail, onDismiss: {
+            if correctingAfterDetail {
+                correctingAfterDetail = false
+                addingToDictionary = true
+            }
+        }) {
+            TranscriptDetailSheet(entry: entry, onCorrect: {
+                correctingAfterDetail = true
+                showingDetail = false
+            })
+        }
+        .confirmationDialog("Delete this transcript?", isPresented: $confirmingDelete) {
+            Button("Delete", role: .destructive) { transcripts.delete(entry.id) }
+        }
+        .onDisappear { copyFeedbackTask?.cancel() }
+        .accessibilityElement(children: .contain)
         .accessibilityLabel(entry.text)
         .accessibilityValue("\(entry.date.formatted(.relative(presentation: .named))), \(entry.wordCount) words")
         .accessibilityAction(named: "Copy") { copy() }
-        .accessibilityAction(named: "Add to Dictionary") { addingToDictionary = true }
+        .accessibilityAction(named: "Correct a word") { addingToDictionary = true }
+        .accessibilityAction(named: "Open full transcript") { showingDetail = true }
+        .accessibilityAction(named: "Delete transcript") { confirmingDelete = true }
     }
 
     private var copyButton: some View {
         Button {
             copy()
         } label: {
-            Label(justCopied ? "Copied" : "Copy", systemImage: justCopied ? "checkmark" : "doc.on.doc")
+            Label(copyFailed ? "Copy failed" : (justCopied ? "Copied" : "Copy"), systemImage: justCopied ? "checkmark" : "doc.on.doc")
                 .font(.echo(11, .medium))
         }
         .buttonStyle(EchoPressButtonStyle())
         .focusable()
         .focused($copyFocused)
         .echoFocusRing(copyFocused, radius: Radius.keycap)
-        .foregroundStyle(justCopied ? Color.echoAccent : Color.echoSecondary)
+        .foregroundStyle(copyFailed ? Color.echoWarning : (justCopied ? Color.echoAccent : Color.echoSecondary))
         .accessibilityLabel("Copy transcript")
         .help("Copy transcript to the clipboard")
     }
 
     private func copy() {
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(entry.text, forType: .string)
+        guard NSPasteboard.general.setString(entry.text, forType: .string) else {
+            copyFailed = true
+            justCopied = false
+            return
+        }
+        copyFailed = false
         withAnimation(Motion.ease) { justCopied = true }
-        Task {
+        copyFeedbackTask?.cancel()
+        copyFeedbackTask = Task {
             try? await Task.sleep(for: .seconds(1.5))
+            guard !Task.isCancelled else { return }
             withAnimation(Motion.ease) { justCopied = false }
+        }
+    }
+}
+
+
+private struct TranscriptDetailSheet: View {
+    let entry: TranscriptEntry
+    let onCorrect: () -> Void
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var transcripts: TranscriptStore
+    @State private var confirmDelete = false
+    @State private var copyNotice: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.m) {
+            Text(entry.date.formatted(date: .abbreviated, time: .standard)).font(.echoDisplay(16))
+            ScrollView {
+                Text(entry.text).font(.echo(14)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if let copyNotice { Text(copyNotice).font(.echo(12)).foregroundStyle(Color.echoSecondary) }
+            HStack {
+                Button("Copy") {
+                    NSPasteboard.general.clearContents()
+                    copyNotice = NSPasteboard.general.setString(entry.text, forType: .string)
+                        ? "Copied to clipboard." : "Could not copy. Try again."
+                }.buttonStyle(EchoSecondaryButtonStyle())
+                Button("Correct a word…", action: onCorrect).buttonStyle(EchoSecondaryButtonStyle())
+                Button("Delete…") { confirmDelete = true }.buttonStyle(EchoSecondaryButtonStyle(destructive: true))
+                Spacer()
+                Button("Done") { dismiss() }.buttonStyle(EchoPrimaryButtonStyle()).keyboardShortcut(.cancelAction)
+            }
+        }
+        .padding(Spacing.l).frame(width: 620, height: 440).background(Color.echoBase)
+        .confirmationDialog("Delete this transcript?", isPresented: $confirmDelete) {
+            Button("Delete", role: .destructive) { transcripts.delete(entry.id); dismiss() }
         }
     }
 }

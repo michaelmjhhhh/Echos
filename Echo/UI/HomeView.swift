@@ -6,6 +6,7 @@ struct HomeView: View {
     @EnvironmentObject private var controller: DictationController
     @EnvironmentObject private var settings: SettingsStore
     @EnvironmentObject private var transcripts: TranscriptStore
+    @EnvironmentObject private var usage: UsageStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var microphoneName = "System Default"
 
@@ -20,7 +21,7 @@ struct HomeView: View {
                     .echoStagger(0, reduceMotion: reduceMotion)
 
                 HStack(spacing: Spacing.m) {
-                    infoCard(eyebrow: "Microphone", value: microphoneName)
+                    infoCard(eyebrow: "Microphone", value: controller.activeMicrophoneName ?? microphoneName)
                     infoCard(eyebrow: "Model", value: modelDisplayName)
                     todayCard
                 }
@@ -34,7 +35,11 @@ struct HomeView: View {
         // Same rule as the sidebar: HAL queries only on selection change,
         // never per render — this view re-renders at waveform frequency.
         .onChange(of: settings.inputDeviceUID, initial: true) { _, uid in
-            microphoneName = MainWindowView.resolveMicrophoneName(uid: uid)
+            Task { microphoneName = await Task.detached(priority: .utility) { MainWindowView.resolveMicrophoneName(uid: uid) }.value }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: AudioInputDevices.changedNotification)) { _ in
+            let uid = settings.inputDeviceUID
+            Task { microphoneName = await Task.detached(priority: .utility) { MainWindowView.resolveMicrophoneName(uid: uid) }.value }
         }
     }
 
@@ -59,6 +64,26 @@ struct HomeView: View {
             }
             .font(.echo(12))
             .padding(.top, Spacing.xs)
+
+            if let notice = controller.deliveryNotice {
+                Text(notice).font(.echo(12)).foregroundStyle(Color.echoSecondary).multilineTextAlignment(.center)
+            }
+            HStack(spacing: Spacing.s) {
+                if controller.canCancel {
+                    Button(controller.isCancelling ? "Cancelling…" : "Cancel dictation") { controller.cancelDictation() }
+                        .buttonStyle(EchoSecondaryButtonStyle())
+                        .disabled(controller.isCancelling)
+                }
+                if controller.canRetry {
+                    Button("Retry setup") { Task { await controller.retrySetup() } }.buttonStyle(EchoSecondaryButtonStyle())
+                }
+                if case .error = controller.state {
+                    Button("Open settings") { section = .settings }.buttonStyle(EchoSecondaryButtonStyle())
+                }
+                if case .copyReady = controller.state {
+                    Button("Copy transcript") { controller.copyTranscript() }.buttonStyle(EchoPrimaryButtonStyle())
+                }
+            }
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, Spacing.xl)
@@ -72,6 +97,7 @@ struct HomeView: View {
     }
 
     private var heroStatus: String {
+        if controller.isCancelling { return "Cancelling…" }
         switch controller.state {
         case .launching: return "Warming up…"
         case .needsPermissions: return "Almost there — grant the permissions above"
@@ -80,7 +106,7 @@ struct HomeView: View {
         case .idle: return "Ready when you are"
         case .recording: return controller.micReady ? "Listening…" : "Starting mic…"
         case .transcribing: return "Transcribing…"
-        case .copyReady: return "No text field — copy from the pill below"
+        case .copyReady: return "Transcript ready to copy"
         case .error(let message): return message
         }
     }
@@ -107,12 +133,12 @@ struct HomeView: View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             EyebrowText(text: "Today")
             HStack(alignment: .firstTextBaseline, spacing: 5) {
-                Text("\(transcripts.todayWordCount)")
+                Text("\(usage.snapshot.todayWords)")
                     .font(.echoMono(15, medium: true))
                     .foregroundStyle(Color.echoText)
                     .contentTransition(.numericText())
-                    .animation(reduceMotion ? nil : Motion.spring, value: transcripts.todayWordCount)
-                Text("words · \(transcripts.todayEntries.count) dictations")
+                    .animation(reduceMotion ? nil : Motion.spring, value: usage.snapshot.todayWords)
+                Text("words · \(usage.snapshot.todayDictations) dictations")
                     .font(.echo(12))
                     .foregroundStyle(Color.echoSecondary)
             }

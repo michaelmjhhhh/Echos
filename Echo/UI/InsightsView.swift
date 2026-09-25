@@ -6,38 +6,8 @@ struct InsightsView: View {
 
     private let calendar = Calendar.current
 
-    /// All card data, derived fresh on every render — no cached copy to go
-    /// stale. Queries are a handful of indexed reads on a tiny local DB.
-    private struct Snapshot {
-        var totals: UsageTotals
-        var wpm: Int
-        var apps: [AppUsage]
-        var daily: [Date: Int]
-        var currentStreak: Int
-        var longestStreak: Int
-    }
-
-    private func makeSnapshot() -> Snapshot {
-        _ = usage.revision // explicit dependency on the store's write counter
-        let since = calendar.date(byAdding: .weekOfYear, value: -20, to: Date()) ?? Date()
-        let daily = usage.dailyWords(since: since)
-        let streaks = Streaks.compute(
-            activeDays: Set(daily.filter { $0.value > 0 }.keys),
-            today: Date(),
-            calendar: calendar
-        )
-        return Snapshot(
-            totals: usage.totals(),
-            wpm: usage.averageWPM(),
-            apps: usage.perAppWords(),
-            daily: daily,
-            currentStreak: streaks.current,
-            longestStreak: streaks.longest
-        )
-    }
-
     var body: some View {
-        let snapshot = makeSnapshot()
+        let snapshot = usage.snapshot
         ScrollView {
             VStack(alignment: .leading, spacing: Spacing.m) {
                 HStack(alignment: .top, spacing: Spacing.m) {
@@ -47,10 +17,23 @@ struct InsightsView: View {
                 }
                 .echoStagger(0, reduceMotion: reduceMotion)
                 HStack(alignment: .top, spacing: Spacing.m) {
-                    appUsageCard(snapshot.apps)
+                    appUsageCard(Array(snapshot.apps.prefix(6)))
                     streakCard(snapshot)
                 }
                 .echoStagger(1, reduceMotion: reduceMotion)
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    EyebrowText(text: "Results")
+                    Text("\(snapshot.totals.words.formatted()) recognized words · \(snapshot.totals.expandedWords.formatted()) output words after snippets")
+                        .font(.echo(12)).foregroundStyle(Color.echoText)
+                    Text("\(snapshot.outcomes["pasteDispatched", default: 0]) paste requests · \(snapshot.outcomes["copied", default: 0]) copied · \(snapshot.outcomes["awaitingCopy", default: 0]) awaiting copy · \(snapshot.outcomes["cancelled", default: 0]) cancelled")
+                        .font(.echo(11)).foregroundStyle(Color.echoSecondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading).echoCard()
+                Text("Words count recognized speech before snippet expansion. A paste request does not confirm that text appeared in another app. Older records may include expanded text.")
+                    .font(.echo(11)).foregroundStyle(Color.echoSecondary)
+                if let error = usage.persistenceError {
+                    Text(error).font(.echo(11)).foregroundStyle(Color.echoWarning)
+                }
             }
             .echoContentColumn()
         }
@@ -132,11 +115,11 @@ struct InsightsView: View {
 
     private func appUsageCard(_ apps: [AppUsage]) -> some View {
         VStack(alignment: .leading, spacing: Spacing.s) {
-            EyebrowText(text: "App usage")
+            EyebrowText(text: "Dictation target apps")
             if apps.isEmpty {
                 Spacer()
                 EchoEmptyState(icon: "app.dashed") {
-                    Text("Dictate into any app and it shows up here.")
+                    Text("The app active when dictation starts appears here.")
                         .font(.echo(12))
                 }
                 Spacer()
@@ -155,8 +138,10 @@ struct InsightsView: View {
         .echoCard()
     }
 
-    private func streakCard(_ snapshot: Snapshot) -> some View {
-        let activeDays = snapshot.daily.values.filter { $0 > 0 }.count
+    private func streakCard(_ snapshot: UsageSnapshot) -> some View {
+        let since = calendar.date(byAdding: .weekOfYear, value: -20, to: Date()) ?? Date()
+        let recentDaily = snapshot.daily.filter { $0.key >= since }
+        let activeDays = recentDaily.values.filter { $0 > 0 }.count
         return VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
                 Text(snapshot.currentStreak == 1 ? "1 day streak" : "\(snapshot.currentStreak) day streak")
@@ -167,7 +152,7 @@ struct InsightsView: View {
                 EyebrowText(text: "Longest | \(snapshot.longestStreak)")
             }
             Spacer(minLength: 0)
-            StreakHeatmap(daily: snapshot.daily)
+            StreakHeatmap(daily: recentDaily)
                 // 126 individual cells are VoiceOver noise — one summary instead.
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("Dictation activity calendar")
@@ -272,7 +257,7 @@ private struct AppUsageBar: View {
                 .frame(width: 44, alignment: .trailing)
         }
         // Truncation recovery + exact value, on the whole row.
-        .help("\(app.words.formatted()) words in \(app.name)")
+        .help("\(app.words.formatted()) recognized words with \(app.name) as the intended destination")
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(app.name)
         .accessibilityValue("\(app.words.formatted()) words")

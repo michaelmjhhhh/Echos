@@ -1,12 +1,19 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The Settings section of the main window (no longer a separate Settings scene).
 struct SettingsView: View {
     @EnvironmentObject private var settings: SettingsStore
     @EnvironmentObject private var models: ModelStore
     @EnvironmentObject private var controller: DictationController
+    @EnvironmentObject private var usage: UsageStore
     @State private var inputDevices: [AudioInputDevice] = []
     @State private var pendingDelete: WhisperModel?
+    @State private var deviceMonitor: AudioInputDeviceMonitor?
+    @State private var deviceRefreshTask: Task<Void, Never>?
+    @State private var deviceRefreshID = UUID()
+    @State private var confirmClearUsage = false
+    @State private var exportNotice: String?
 
     var body: some View {
         ScrollView {
@@ -22,6 +29,13 @@ struct SettingsView: View {
                         .labelsHidden()
                         .frame(width: EchoLayout.settingsControlWidth)
                     }
+                    if let name = controller.activeMicrophoneName {
+                        footnote("Last used input: \(name)")
+                    }
+                    if let uid = settings.inputDeviceUID, !inputDevices.contains(where: { $0.uid == uid }) {
+                        footnote("Selected microphone is disconnected. Echo uses the system default until it returns.", warning: true)
+                    }
+                    footnote("The microphone may stay active briefly between dictations for faster starts. Idle audio is discarded.")
                     hairline
                     labeledRow("Dictation key") {
                         Picker("", selection: $settings.hotkey) {
@@ -57,6 +71,7 @@ struct SettingsView: View {
                             .toggleStyle(.switch)
                             .controlSize(.small)
                     }
+                    if let message = settings.launchAtLoginError { footnote(message, warning: true) }
                     hairline
                     labeledRow("Save dictation history") {
                         Toggle("", isOn: $settings.saveHistory)
@@ -64,7 +79,7 @@ struct SettingsView: View {
                             .toggleStyle(.switch)
                             .controlSize(.small)
                     }
-                    footnote("History is stored only on this Mac — nothing ever leaves it.")
+                    footnote("Transcripts stay on this Mac. Turning this off does not delete existing history or usage statistics.")
                     hairline
                     labeledRow("Copy transcript to clipboard") {
                         Toggle("", isOn: $settings.copyTranscriptToClipboard)
@@ -74,6 +89,9 @@ struct SettingsView: View {
                     }
                     footnote("The latest transcript stays on the clipboard so you can paste it again.")
                 }
+
+                recognitionSettings
+                usageSettings
 
                 settingsCard(eyebrow: "Model") {
                     ForEach(Array(models.catalog.enumerated()), id: \.element.id) { index, model in
@@ -100,14 +118,41 @@ struct SettingsView: View {
                     if let error = models.lastError {
                         footnote(error, warning: true)
                     }
-                    footnote("Larger models are more accurate but slower to load and transcribe. All models run fully on-device.")
+                    HStack {
+                        if controller.canRetry {
+                            Button("Retry setup") { Task { await controller.retrySetup() } }
+                                .buttonStyle(EchoSecondaryButtonStyle())
+                        }
+                        Button("Repair current model") { Task { await controller.repairModel(); models.refresh() } }
+                            .buttonStyle(EchoSecondaryButtonStyle())
+                            .disabled(!modelRowsEnabled)
+                    }
+                    footnote("Transcription runs on this Mac. Model and language-file installation requires internet access. Repair downloads missing or damaged files.")
                 }
             }
             .echoContentColumn()
         }
         .onAppear {
-            inputDevices = AudioInputDevices.all()
+            deviceMonitor = AudioInputDeviceMonitor()
+            refreshDevices()
+            settings.refreshLaunchAtLoginStatus()
             models.refresh()
+        }
+        .onDisappear {
+            deviceMonitor = nil
+            deviceRefreshID = UUID()
+            deviceRefreshTask?.cancel()
+            deviceRefreshTask = nil
+        }
+        .onReceive(NotificationCenter.default.publisher(for: AudioInputDevices.changedNotification)) { _ in refreshDevices() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            settings.refreshLaunchAtLoginStatus()
+            usage.refresh()
+        }
+        .confirmationDialog("Delete all usage statistics?", isPresented: $confirmClearUsage) {
+            Button("Delete statistics", role: .destructive) { Task { _ = await usage.clear() } }
+        } message: {
+            Text("This deletes counts, timings and app usage on this Mac. Transcript history is managed separately.")
         }
         .confirmationDialog(
             "Delete \(pendingDelete?.displayName ?? "model")?",
@@ -122,6 +167,113 @@ struct SettingsView: View {
             Button("Cancel", role: .cancel) {}
         } message: { _ in
             Text("You can download it again anytime.")
+        }
+    }
+
+    private var recognitionSettings: some View {
+        settingsCard(eyebrow: "Recognition") {
+            labeledRow("Spoken language") {
+                if WhisperModelCatalog.supportsMultilingual(settings.modelVariant) {
+                    Picker("Spoken language", selection: $settings.transcriptionLanguage) {
+                        Text("Detect automatically").tag("auto")
+                        Text("English").tag("en")
+                        Text("Chinese").tag("zh")
+                        Text("Spanish").tag("es")
+                        Text("French").tag("fr")
+                        Text("German").tag("de")
+                        Text("Japanese").tag("ja")
+                        Text("Korean").tag("ko")
+                        Text("Italian").tag("it")
+                        Text("Portuguese").tag("pt")
+                    }
+                    .labelsHidden()
+                    .frame(width: EchoLayout.settingsControlWidth)
+                } else {
+                    Text("English only for this model").font(.echo(12)).foregroundStyle(Color.echoSecondary)
+                }
+            }
+            hairline
+            labeledRow("Dictionary hints") {
+                Picker("Dictionary hints", selection: $settings.vocabularyTokenBudget) {
+                    Text("Off").tag(0)
+                    Text("25 tokens").tag(25)
+                    Text("50 tokens").tag(50)
+                    Text("100 tokens").tag(100)
+                    Text("200 tokens (default)").tag(200)
+                }
+                .labelsHidden()
+                .frame(width: EchoLayout.settingsControlWidth)
+            }
+            footnote("Tokens are small pieces of text. A smaller hint limit may be faster but includes fewer dictionary terms. Star the terms you need most. Saved spelling corrections still apply with hints off.")
+            hairline
+            labeledRow("Retry difficult speech") {
+                Picker("Retry difficult speech", selection: $settings.decodingFallbackCount) {
+                    Text("No retries").tag(0)
+                    Text("Once").tag(1)
+                    Text("Twice").tag(2)
+                    Text("Up to 5 times (default)").tag(5)
+                }
+                .labelsHidden()
+                .frame(width: EchoLayout.settingsControlWidth)
+            }
+            footnote("Fewer retries can reduce waiting on unclear audio and may reduce recognition quality.")
+            hairline
+            labeledRow("Expand spoken snippets") {
+                Toggle("Expand spoken snippets", isOn: $settings.expandSnippets).labelsHidden().toggleStyle(.switch).controlSize(.small)
+            }
+            footnote("Turn this off to dictate trigger phrases literally. Each snippet can also be limited to a phrase spoken on its own.")
+        }
+    }
+
+    private var usageSettings: some View {
+        settingsCard(eyebrow: "Usage statistics") {
+            labeledRow("Keep local usage statistics") {
+                Toggle("Keep local usage statistics", isOn: $settings.saveUsageStatistics).labelsHidden().toggleStyle(.switch).controlSize(.small)
+            }
+            footnote("Counts, app identifiers, dates and timing measurements are stored separately from transcript history. Audio and text are never included in statistics. Turning this off stops new records; existing records remain until deleted or expired.")
+            labeledRow("Keep statistics for") {
+                Picker("Keep statistics for", selection: $settings.usageRetentionDays) {
+                    Text("Until I delete them").tag(0)
+                    Text("30 days").tag(30)
+                    Text("90 days").tag(90)
+                    Text("1 year").tag(365)
+                }
+                .labelsHidden()
+                .frame(width: EchoLayout.settingsControlWidth)
+            }
+            HStack {
+                Button("Export summary…") { exportUsage() }.buttonStyle(EchoSecondaryButtonStyle())
+                Button("Delete statistics…") { confirmClearUsage = true }.buttonStyle(EchoSecondaryButtonStyle(destructive: true))
+                    .disabled(usage.isSaving)
+            }
+            footnote("Export contains aggregate counts and timing ranges, without app names, transcripts, prompts, audio or clipboard content.")
+            if let message = usage.persistenceError {
+                footnote(message, warning: true)
+                Button("Retry saving statistics") { usage.retrySave() }.buttonStyle(EchoSecondaryButtonStyle()).disabled(usage.isSaving)
+            }
+            if let exportNotice { footnote(exportNotice) }
+        }
+    }
+
+    private func refreshDevices() {
+        deviceRefreshTask?.cancel()
+        let id = UUID()
+        deviceRefreshID = id
+        deviceRefreshTask = Task {
+            let devices = await Task.detached(priority: .utility) { AudioInputDevices.all() }.value
+            guard !Task.isCancelled, deviceRefreshID == id else { return }
+            inputDevices = devices
+            deviceRefreshTask = nil
+        }
+    }
+
+    private func exportUsage() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.json]
+        panel.nameFieldStringValue = "echo-usage-summary.json"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        Task {
+            exportNotice = await usage.exportAggregates(to: url) ? "Summary exported." : "Export failed. Check the error above."
         }
     }
 
@@ -218,7 +370,7 @@ private struct ModelRow: View {
         .opacity(isSupported ? 1 : 0.4)
         .allowsHitTesting(isSupported)
         .help(activatesOnTap ? "Switch to \(model.displayName)" : "")
-        .accessibilityElement(children: .ignore)
+        .accessibilityElement(children: .contain)
         .accessibilityLabel(accessibilitySummary)
         .accessibilityAddTraits(activatesOnTap ? .isButton : [])
     }
@@ -263,6 +415,10 @@ private struct ModelRow: View {
                 .buttonStyle(EchoSecondaryButtonStyle())
                 .disabled(!isEnabled)
         } else if !isActive {
+            Button("Use", action: onActivate)
+                .buttonStyle(EchoSecondaryButtonStyle())
+                .disabled(!activatesOnTap)
+                .accessibilityLabel("Use \(model.displayName)")
             Button(action: onDelete) {
                 Image(systemName: "trash")
                     .font(.system(size: IconSize.small))
