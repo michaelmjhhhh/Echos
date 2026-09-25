@@ -1,7 +1,7 @@
 name: Release
 
 # Publish a DMG to GitHub Releases whenever a version tag is pushed:
-#   git tag v0.2.0 && git push origin v0.2.0
+#   git tag v0.4.0 && git push origin v0.4.0
 # workflow_dispatch builds the DMG as an artifact without publishing a release.
 #
 # Signing modes (chosen automatically):
@@ -9,7 +9,7 @@ name: Release
 #     hardened runtime, the DMG is notarized and stapled, and recipients can
 #     open it with a normal double-click.
 #   - Otherwise the build is ad-hoc signed and the release notes include the
-#     one-time `xattr -cr` Gatekeeper instruction.
+#     one-time quarantine-removal instruction.
 #
 # Required secrets for notarized releases:
 #   DEVELOPER_ID_P12          base64 of the "Developer ID Application" cert (.p12)
@@ -27,13 +27,54 @@ permissions:
   contents: write
 
 jobs:
+  validate:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
   release:
-    runs-on: macos-15
+    needs: validate
+    runs-on: macos-26
     env:
-      SIGNING_ENABLED: ${{ secrets.DEVELOPER_ID_P12 != '' && secrets.NOTARY_KEY_P8 != '' }}
+      DEVELOPER_DIR: /Applications/Xcode_26.5.app/Contents/Developer
+      SIGNING_ENABLED: ${{ secrets.DEVELOPER_ID_P12 != '' && secrets.DEVELOPER_ID_P12_PASSWORD != '' && secrets.NOTARY_KEY_P8 != '' && secrets.NOTARY_KEY_ID != '' && secrets.NOTARY_ISSUER_ID != '' }}
       APP: build/Build/Products/Release/Echo.app
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate release version and changelog
+        run: |
+          python3 - <<'PY'
+          import datetime
+          import os
+          from pathlib import Path
+          import re
+          import subprocess
+
+          project = Path("project.yml").read_text()
+          match = re.search(r'^\s+CFBundleShortVersionString: "(\d+\.\d+\.\d+)"$', project, re.MULTILINE)
+          if not match:
+              raise SystemExit("project.yml must declare a semantic app version")
+          version = match.group(1)
+          tag = f"v{version}"
+          if os.environ["GITHUB_REF_TYPE"] == "tag":
+              if os.environ["GITHUB_REF_NAME"] != tag:
+                  raise SystemExit(f"Tag must match project.yml: expected {tag}")
+              subprocess.run(["git", "merge-base", "--is-ancestor", os.environ["GITHUB_SHA"], "origin/main"], check=True)
+          changelog = Path("CHANGELOG.md").read_text()
+          entry = re.search(rf'^## \[{re.escape(version)}\] - (\d{{4}}-\d{{2}}-\d{{2}})\n(.*?)(?=^## |^\[Unreleased\]:|\Z)', changelog, re.MULTILINE | re.DOTALL)
+          if not entry or not entry.group(2).strip():
+              raise SystemExit(f"Missing dated, nonempty CHANGELOG.md entry for {version}")
+          datetime.date.fromisoformat(entry.group(1))
+          Path("release-changes.md").write_text(entry.group(2).strip() + "\n")
+          current = tuple(map(int, version.split(".")))
+          tags = subprocess.check_output(["git", "tag", "--merged", os.environ["GITHUB_SHA"], "--sort=-version:refname"], text=True).splitlines()
+          previous = next((item for item in tags if re.fullmatch(r"v\d+\.\d+\.\d+", item) and tuple(map(int, item[1:].split("."))) < current), "")
+          with open(os.environ["GITHUB_ENV"], "a") as output:
+              output.write(f"RELEASE_VERSION={version}\nRELEASE_TAG={tag}\nPREVIOUS_TAG={previous}\n")
+          PY
 
       - name: Install XcodeGen
         run: brew install xcodegen
@@ -41,22 +82,28 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
+      - name: Resolve reviewed dependency revisions
+        run: |
+          xcodebuild -project Echo.xcodeproj -scheme Echo -resolvePackageDependencies \
+            -clonedSourcePackagesDirPath build/SourcePackages -onlyUsePackageVersionsFromResolvedFile
+          python3 scripts/verify-package-lock.py
+
       # Build unsigned; the dedicated signing step below picks the identity.
       # Apple Silicon only (see README).
       - name: Build Echo.app
         run: |
           xcodebuild -scheme Echo -configuration Release \
             -derivedDataPath build \
+            -clonedSourcePackagesDirPath build/SourcePackages \
+            -disableAutomaticPackageResolution -onlyUsePackageVersionsFromResolvedFile \
             ARCHS=arm64 \
             CODE_SIGNING_ALLOWED=NO \
             build
 
-      - name: Stamp version from tag
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Verify built app version
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$APP/Contents/Info.plist"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $GITHUB_RUN_NUMBER" "$APP/Contents/Info.plist"
+          BUILT_VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")
+          test "$BUILT_VERSION" = "$RELEASE_VERSION"
 
       - name: Import Developer ID certificate
         if: env.SIGNING_ENABLED == 'true'
@@ -94,7 +141,7 @@ jobs:
           codesign --force "${FLAGS[@]}" \
             --entitlements Echo/Echo.entitlements \
             -s "$IDENTITY" "$APP"
-          codesign --verify --verbose=2 "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
 
       - name: Create DMG
         run: |
@@ -102,7 +149,7 @@ jobs:
           mkdir "$STAGING"
           cp -R "$APP" "$STAGING/"
           ln -s /Applications "$STAGING/Applications"
-          hdiutil create -volname "Echo" -srcfolder "$STAGING" -ov -format UDZO "Echo-${GITHUB_REF_NAME}.dmg"
+          hdiutil create -volname "Echo" -srcfolder "$STAGING" -ov -format UDZO "Echo-${RELEASE_TAG}.dmg"
 
       - name: Notarize and staple DMG
         if: env.SIGNING_ENABLED == 'true'
@@ -111,7 +158,7 @@ jobs:
           NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
           NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
         run: |
-          DMG="Echo-${GITHUB_REF_NAME}.dmg"
+          DMG="Echo-${RELEASE_TAG}.dmg"
           codesign --force --timestamp -s "Developer ID Application" "$DMG"
           echo "$NOTARY_KEY_P8" | base64 -d > "$RUNNER_TEMP/notary.p8"
           xcrun notarytool submit "$DMG" \
@@ -123,45 +170,77 @@ jobs:
           xcrun stapler staple "$DMG"
           xcrun stapler validate "$DMG"
 
-      - name: Upload DMG artifact
+      - name: Prepare release notes and verification assets
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import plistlib
+
+          tag = os.environ["RELEASE_TAG"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          server = os.environ["GITHUB_SERVER_URL"]
+          commit = os.environ["GITHUB_SHA"]
+          run_url = f"{server}/{repo}/actions/runs/{os.environ['GITHUB_RUN_ID']}"
+          dmg = Path(f"Echo-{tag}.dmg")
+          digest = hashlib.sha256(dmg.read_bytes()).hexdigest()
+          Path("SHA256SUMS").write_text(f"{digest}  {dmg.name}\n")
+          signed = os.environ["SIGNING_ENABLED"] == "true"
+          with open(Path(os.environ["APP"]) / "Contents/Info.plist", "rb") as source:
+              info = plistlib.load(source)
+          manifest = {
+              "version": info["CFBundleShortVersionString"],
+              "buildNumber": info["CFBundleVersion"],
+              "sourceCommit": commit,
+              "tag": tag,
+              "architecture": "arm64",
+              "minimumMacOS": "14.0",
+              "signing": "Developer ID; notarized and stapled" if signed else "ad-hoc; not notarized",
+              "dependencyLockSHA256": hashlib.sha256(Path("config/Package.resolved").read_bytes()).hexdigest(),
+              "asset": dmg.name,
+              "assetSHA256": digest,
+              "validationWorkflow": run_url,
+          }
+          manifest_name = f"Echo-{tag}-build.json"
+          Path(manifest_name).write_text(json.dumps(manifest, indent=2) + "\n")
+          notes = "## Changes\n\n" + Path("release-changes.md").read_text()
+          notes += "\n## Install\n\nRequires an Apple Silicon Mac running macOS 14 or later.\n\n"
+          notes += f"1. Download `{dmg.name}`, open it, and drag **Echo** to **Applications**.\n"
+          if signed:
+              notes += "2. This build is Developer ID signed, notarized, and stapled. Launch Echo normally.\n"
+          else:
+              notes += "2. This build is ad-hoc signed and **not notarized**. After verifying the downloaded asset, remove quarantine from the installed app if macOS blocks it:\n\n"
+              notes += "   ```sh\n   xattr -dr com.apple.quarantine /Applications/Echo.app\n   ```\n\n"
+          notes += "3. Launch Echo, grant **Microphone** and **Accessibility** permissions, and complete the one-time model download if needed. Existing installed models are reused.\n"
+          notes += "4. Hold your configured dictation key (default: Right Option), speak, then release.\n"
+          notes += "\n## Verification\n\n"
+          notes += f"- [Release workflow]({run_url}): build, existing automated checks, dependency-lock validation, and synthetic audio replay passed before packaging.\n"
+          notes += f"- Source: [`{commit[:12]}`]({server}/{repo}/commit/{commit}). `{manifest_name}` records the app version, build number, signing status, source commit, and dependency-lock hash.\n"
+          notes += "- Download `SHA256SUMS` beside the DMG and run `shasum -a 256 -c SHA256SUMS` to verify the asset. Synthetic replay is not a measurement of natural-dictation accuracy.\n"
+          previous = os.environ["PREVIOUS_TAG"]
+          compare = f"{server}/{repo}/compare/{previous}...{tag}" if previous else f"{server}/{repo}/commits/{tag}"
+          notes += f"\n**Full Changelog**: [{previous + '...' + tag if previous else tag}]({compare})\n"
+          Path("release-notes.md").write_text(notes)
+          PY
+
+      - name: Upload release artifacts
         uses: actions/upload-artifact@v4
         with:
           name: Echo-dmg
-          path: Echo-*.dmg
+          path: |
+            Echo-*.dmg
+            SHA256SUMS
+            Echo-*-build.json
+            release-notes.md
 
       - name: Publish GitHub release
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if [ "$SIGNING_ENABLED" = "true" ]; then
-            cat > release-notes.md <<'EOF'
-          ## Install
-
-          1. Download the DMG below, open it, and drag **Echo** to **Applications**.
-          2. Launch Echo, grant **Microphone** and **Accessibility** permissions, and wait for the one-time model download (~600 MB).
-          3. Hold **Right ⌥**, speak, release.
-
-          Requires an Apple Silicon Mac running macOS 14+.
-          EOF
-          else
-            cat > release-notes.md <<'EOF'
-          ## Install
-
-          1. Download the DMG below, open it, and drag **Echo** to **Applications**.
-          2. Echo is not notarized (it's a free, unsigned build), so macOS will refuse to open it at first. Clear the quarantine flag once:
-
-             ```sh
-             xattr -cr /Applications/Echo.app
-             ```
-
-          3. Launch Echo, grant **Microphone** and **Accessibility** permissions, and wait for the one-time model download (~600 MB).
-          4. Hold **Right ⌥**, speak, release.
-
-          Requires an Apple Silicon Mac running macOS 14+.
-          EOF
-          fi
-          gh release create "$GITHUB_REF_NAME" "Echo-${GITHUB_REF_NAME}.dmg" \
-            --title "Echo ${GITHUB_REF_NAME}" \
-            --notes-file release-notes.md \
-            --generate-notes
+          gh release create "$RELEASE_TAG" \
+            "Echo-${RELEASE_TAG}.dmg" SHA256SUMS "Echo-${RELEASE_TAG}-build.json" \
+            --verify-tag --title "Echo ${RELEASE_TAG}" \
+            --notes-file release-notes.md
