@@ -9,7 +9,7 @@ All user-facing and engineering changes are recorded here. Model weights are unc
 ### Added
 
 - Add language, prompt-budget, and difficult-audio retry settings, with same-model retry and repair after failures.
-- Add full transcript history, correction, explicit save/recovery errors, and separate controls for usage retention, deletion, and summary export.
+- Add a full-transcript viewer and per-entry deletion, expose save/recovery errors, and add separate controls for usage retention, deletion, and summary export.
 - Add the `EchoEvaluate` replay tool, synthetic audio fixtures, dependency-lock verification, and CI checks before release.
 - Add this changelog and documented requirements for future changelog updates and release notes.
 
