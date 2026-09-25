@@ -78,17 +78,22 @@ final class WhisperModelCatalogTests: XCTestCase {
 
     // MARK: - Helpers
 
-    /// Creates a fake downloaded model folder; pass `missing:` to omit one artifact.
+    /// Structural installation fixture, not runnable CoreML weights. Activation is
+    /// checked separately. Pass `missing:` to omit a required model artifact.
     private func makeModelFolder(variant: String, missing: String? = nil) throws {
         let folder = WhisperModelPaths.modelFolder(for: variant, downloadBase: base)
         let fm = FileManager.default
         try fm.createDirectory(at: folder, withIntermediateDirectories: true)
         for artifact in ["AudioEncoder.mlmodelc", "TextDecoder.mlmodelc", "MelSpectrogram.mlmodelc"]
         where artifact != missing {
-            try fm.createDirectory(at: folder.appendingPathComponent(artifact), withIntermediateDirectories: true)
+            let compiledFolder = folder.appendingPathComponent(artifact)
+            try fm.createDirectory(at: compiledFolder, withIntermediateDirectories: true)
+            try Data("structural-model-fixture".utf8).write(to: compiledFolder.appendingPathComponent("fixture.bin"))
         }
         if missing != "config.json" {
-            try Data("{}".utf8).write(to: folder.appendingPathComponent("config.json"))
+            try Data(#"{"model_type":"whisper"}"#.utf8).write(to: folder.appendingPathComponent("config.json"))
         }
+        try Data(#"{"model":{"type":"BPE","vocab":{}}}"#.utf8).write(to: folder.appendingPathComponent("tokenizer.json"))
+        try Data(#"{"tokenizer_class":"WhisperTokenizer"}"#.utf8).write(to: folder.appendingPathComponent("tokenizer_config.json"))
     }
 }

@@ -15,22 +15,24 @@ final class TranscriptionServiceTests: XCTestCase {
         super.tearDown()
     }
 
-    /// An already-downloaded model must prepare locally — no network, instant
-    /// completion — so switching back to a downloaded model works offline.
-    func testPrepareUsesLocalFolderWhenModelAlreadyDownloaded() async throws {
-        // Deliberately fake variant: if prepare ever hits the network for it,
-        // the download fails and so does the test.
+    /// An unknown variant cannot become installed merely by creating structural
+    /// placeholder files. Preparation rejects it before any network acquisition.
+    func testPrepareRejectsUnknownVariantWithoutPublishingReadiness() async throws {
         let variant = "echo-tests_fake-variant"
         try makeModelFolder(variant: variant, at: base)
         let service = TranscriptionService(modelVariant: variant, downloadBase: base)
-
         var reported: [Double] = []
-        try await service.prepare { reported.append($0) }
 
-        XCTAssertEqual(reported.last, 1)
-        XCTAssertEqual(
-            service.modelFolder?.path,
-            WhisperModelPaths.modelFolder(for: variant, downloadBase: base).path
-        )
+        do {
+            try await service.prepare { reported.append($0) }
+            XCTFail("An unknown model variant must not be accepted as installed")
+        } catch ModelInstallationError.unknownVariant {
+            // This local catalog rejection occurs before model or tokenizer download.
+        } catch {
+            XCTFail("Unexpected preparation error: \(error)")
+        }
+
+        XCTAssertTrue(reported.isEmpty)
+        XCTAssertNil(service.modelFolder)
     }
 }
