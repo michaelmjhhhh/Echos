@@ -29,7 +29,11 @@ struct SnippetsView: View {
     }
 
     var body: some View {
-        Group {
+        VStack(alignment: .leading, spacing: Spacing.s) {
+            PersistenceStatusView(error: snippets.persistenceError, isSaving: snippets.isSaving,
+                recoveryAvailable: snippets.recoveryAvailable,
+                retry: { _ = snippets.retrySave() }, recover: { _ = snippets.recoverFromBackup() },
+                startFresh: { _ = snippets.startFresh() })
             if snippets.entries.isEmpty {
                 firstRunEmptyState
             } else {

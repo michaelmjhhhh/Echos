@@ -12,6 +12,11 @@ final class DictationController: ObservableObject {
     @Published private(set) var micReady = false
     /// Briefly true after the user clicks Copy on the pill.
     @Published private(set) var copyConfirmed = false
+    @Published private(set) var isCancelling = false
+    @Published private(set) var deliveryNotice: String?
+    @Published private(set) var activeMicrophoneName: String?
+    @Published private(set) var provisionalText = ""
+    var openMainWindow: (() -> Void)?
 
     /// Set while a model switch is in flight; drives the Settings row spinner.
     @Published private(set) var pendingModelVariant: String?
@@ -19,6 +24,7 @@ final class DictationController: ObservableObject {
     private let settings: SettingsStore
     private let recorder: AudioRecording
     private var transcriber: Transcribing
+    private var transcriberVariant: String
     private let makeTranscriber: (String) -> Transcribing
     private let inserter: TextInserting
     private let processors: [TextProcessor]
@@ -36,7 +42,33 @@ final class DictationController: ObservableObject {
     private lazy var waveformCoalescer = WaveformLevelCoalescer { [weak self] level in
         self?.audioLevel = level
     }
-    private var recordingStartedAt: Date?
+    private var recordingStartedAt: ContinuousClock.Instant?
+    private var setupTask: Task<Void, Never>?
+    private var setupID: UUID?
+    private var expiryTask: Task<Void, Never>?
+    private var timeoutTask: Task<Void, Never>?
+    private var permissionTask: Task<Void, Never>?
+    private var modelReady = false
+    private var checksPermissions = true
+    private var activeSession: Session?
+    private var lastSessionID: UUID?
+    private var cancellationMessage: String?
+    private var isTerminating = false
+    private var modelLoadingDuration: TimeInterval?
+    private var startupDuration: TimeInterval?
+
+    private struct Session {
+        let id: UUID
+        let started: ContinuousClock.Instant
+        var target: InsertionTarget?
+        let app: NSRunningApplication?
+        let modelVariant: String
+        let request: TranscriptionRequest
+        let replacements: [CompiledReplacementRule]
+        let snippets: [CompiledSnippetRule]
+        let keepOnClipboard: Bool
+        let saveHistory: Bool
+    }
     private var cancellables: Set<AnyCancellable> = []
 
     /// Auto-stop cap so a stuck key can't record forever.
@@ -51,11 +83,11 @@ final class DictationController: ObservableObject {
     private var isFinishingRecording = false
 
     init(
-        settings: SettingsStore = .shared,
-        recorder: AudioRecording = AudioRecorder(),
+        settings: SettingsStore? = nil,
+        recorder: AudioRecording? = nil,
         transcriber: Transcribing? = nil,
         transcriberFactory: ((String) -> Transcribing)? = nil,
-        inserter: TextInserting = TextInserter(),
+        inserter: TextInserting? = nil,
         processors: [TextProcessor] = [WhitespaceCleanupProcessor()],
         hotkeyMonitor: HotkeyMonitoring? = nil,
         transcripts: TranscriptStore? = nil,
@@ -66,6 +98,9 @@ final class DictationController: ObservableObject {
         trimmer: (any AudioTrimming)? = nil,
         autostart: Bool = true
     ) {
+        let settings = settings ?? SettingsStore.shared
+        let recorder = recorder ?? AudioRecorder()
+        let inserter = inserter ?? TextInserter()
         self.transcripts = transcripts
         self.usage = usage
         self.dictionary = dictionary
@@ -75,6 +110,7 @@ final class DictationController: ObservableObject {
         let factory = transcriberFactory ?? { TranscriptionService(modelVariant: $0) }
         self.makeTranscriber = factory
         self.transcriber = transcriber ?? factory(settings.modelVariant)
+        self.transcriberVariant = settings.modelVariant
         self.inserter = inserter
         self.captureConfiguration = captureConfiguration
         self.trimmer = trimmer ?? VoiceActivityTrimmer(configuration: captureConfiguration)
@@ -91,51 +127,163 @@ final class DictationController: ObservableObject {
         self.recorder.onLevel = { level in
             waveformCoalescer.submit(level)
         }
-        self.recorder.onCaptureReady = { [weak self] in
-            if Thread.isMainThread {
-                MainActor.assumeIsolated { self?.micReady = true }
-            } else {
-                Task { @MainActor in self?.micReady = true }
-            }
-        }
+        settings.$hotkey.removeDuplicates().sink { [weak self] hotkey in
+            guard let self else { return }
+            // A recording retains the physical binding that began it.
+            if self.activeSession == nil { self.hotkeyMonitor.hotkey = hotkey }
+        }.store(in: &cancellables)
 
-        settings.$hotkey
-            .removeDuplicates()
-            .sink { [weak self] hotkey in self?.hotkeyMonitor.hotkey = hotkey }
-            .store(in: &cancellables)
+        usage?.configure(enabled: settings.saveUsageStatistics, retentionDays: settings.usageRetentionDays)
+        Publishers.CombineLatest(settings.$saveUsageStatistics, settings.$usageRetentionDays)
+            .dropFirst().sink { [weak usage] enabled, days in
+                usage?.configure(enabled: enabled, retentionDays: days)
+            }.store(in: &cancellables)
 
         let isHostingTests = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
-        #if DEBUG
-        // Temporary diagnostic: exercise the insertion-target check on a timer
-        // so the decision can be observed via `log show` without dictating.
-        if autostart && !isHostingTests && ProcessInfo.processInfo.environment["ECHO_PROBE_TARGET"] != nil {
-            Task { [inserter] in
-                while !Task.isCancelled {
-                    _ = inserter.hasInsertionTarget
-                    try? await Task.sleep(for: .seconds(2))
-                }
-            }
-        }
-        #endif
+        checksPermissions = autostart && !isHostingTests
         if autostart && !isHostingTests {
             let overlay = OverlayController()
             self.overlay = overlay
             overlay.onCopy = { [weak self] in self?.copyTranscript() }
+            overlay.onCancel = { [weak self] in self?.cancelDictation() }
+            overlay.onOpen = { [weak self] in self?.openMainWindow?() }
             Publishers.CombineLatest4($state, $audioLevel, $micReady, $copyConfirmed)
                 .sink { state, level, micReady, copyConfirmed in
                     overlay.update(state: state, level: level, micReady: micReady, copyConfirmed: copyConfirmed)
                 }
                 .store(in: &cancellables)
+            $isCancelling.sink { overlay.updateCancellation($0) }.store(in: &cancellables)
             Task { await start() }
+            startPermissionMonitoring()
+            NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.willSleepNotification)
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] _ in self?.cancelDictation() }
+                .store(in: &cancellables)
         }
     }
 
+    var canCancel: Bool {
+        activeSession != nil || isFinishingRecording || setupTask != nil
+    }
+
+    var canRetry: Bool {
+        guard setupTask == nil, !isFinishingRecording, activeSession == nil else { return false }
+        if case .error = state { return true }
+        if case .needsPermissions = state { return true }
+        return false
+    }
+
     func start() async {
-        await waitForPermissions()
-        do {
-            try await prepareAndLoad()
-        } catch {
-            state = .error("Model setup failed: \(error.localizedDescription)")
+        await runSetup(variant: settings.modelVariant, forceRepair: false, allowRollback: false)
+    }
+
+    func retrySetup() async { await start() }
+
+    func repairModel() async {
+        guard canSwitchModels || canRetry else { return }
+        await runSetup(variant: settings.modelVariant, forceRepair: true, allowRollback: false)
+    }
+
+    func activateForTesting() {
+        checksPermissions = false
+        modelReady = true
+        state = .idle
+    }
+
+    var canSwitchModels: Bool {
+        guard setupTask == nil, !isFinishingRecording, activeSession == nil, !isCancelling else { return false }
+        switch state {
+        case .idle, .copyReady, .error: return true
+        default: return false
+        }
+    }
+
+    func switchModel(to variant: String) async {
+        guard canSwitchModels, variant != settings.modelVariant else { return }
+        await runSetup(variant: variant, forceRepair: false, allowRollback: true)
+    }
+
+    private func runSetup(variant: String, forceRepair: Bool, allowRollback: Bool) async {
+        guard setupTask == nil, !isFinishingRecording, activeSession == nil else { return }
+        expiryTask?.cancel()
+        let id = UUID()
+        let previousVariant = settings.modelVariant
+        let setupStarted = ContinuousClock.now
+        setupID = id
+        modelReady = false
+        pendingModelVariant = variant
+        hotkeyMonitor.stop()
+        let task = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if self.setupID == id {
+                    self.setupID = nil
+                    self.setupTask = nil
+                    self.pendingModelVariant = nil
+                    self.isCancelling = false
+                }
+            }
+            do {
+                if self.checksPermissions { try await self.waitForPermissions() }
+                try Task.checkCancellation()
+                if variant != self.transcriberVariant || forceRepair {
+                    self.transcriber = self.makeTranscriber(variant)
+                    self.transcriberVariant = variant
+                }
+                try await self.prepareAndLoad(id: id, forceRepair: forceRepair)
+                try Task.checkCancellation()
+                guard self.setupID == id else { return }
+                self.settings.modelVariant = variant
+                self.startupDuration = setupStarted.duration(to: .now).timeInterval
+                self.modelReady = true
+                self.armReadyState()
+            } catch is CancellationError {
+                self.state = .error("Model setup cancelled. Retry when ready.")
+            } catch {
+                let failure = error.localizedDescription
+                if allowRollback, !Task.isCancelled {
+                    self.transcriber = self.makeTranscriber(previousVariant)
+                    self.transcriberVariant = previousVariant
+                    do {
+                        try await self.prepareAndLoad(id: id, forceRepair: false)
+                        try Task.checkCancellation()
+                        self.modelReady = true
+                        self.armReadyState()
+                        self.state = .error("Couldn't switch model: \(failure)")
+                        self.scheduleReturnToIdle()
+                    } catch {
+                        self.state = .error("Model recovery failed: \(error.localizedDescription). Retry or repair the model in Settings.")
+                    }
+                } else {
+                    self.state = .error("Model setup failed: \(failure). Retry or repair the model in Settings.")
+                }
+            }
+        }
+        setupTask = task
+        await task.value
+    }
+
+    private func prepareAndLoad(id: UUID, forceRepair: Bool) async throws {
+        state = .downloadingModel(progress: 0)
+        try await transcriber.prepare(forceRepair: forceRepair) { [weak self] progress in
+            Task { @MainActor in
+                guard let self, self.setupID == id, !self.isCancelling,
+                      case .downloadingModel = self.state else { return }
+                self.state = .downloadingModel(progress: min(1, max(0, progress)))
+            }
+        }
+        try Task.checkCancellation()
+        state = .loadingModel
+        let loadingStarted = ContinuousClock.now
+        try await transcriber.loadModel()
+        modelLoadingDuration = loadingStarted.duration(to: .now).timeInterval
+    }
+
+    private func armReadyState() {
+        guard modelReady, !isTerminating else { return }
+        if checksPermissions && !(Permissions.microphoneGranted && Permissions.accessibilityGranted) {
+            state = .needsPermissions(microphone: Permissions.microphoneGranted,
+                                      accessibility: Permissions.accessibilityGranted)
             return
         }
         hotkeyMonitor.hotkey = settings.hotkey
@@ -143,113 +291,207 @@ final class DictationController: ObservableObject {
         state = .idle
     }
 
-    /// Test seam: arms the controller without permission checks or model loading.
-    func activateForTesting() {
-        state = .idle
-    }
-
-    // MARK: - Model switching
-
-    /// Switching is only safe when no dictation or model setup is in flight.
-    var canSwitchModels: Bool {
-        switch state {
-        case .idle, .copyReady, .error: return true
-        default: return false
-        }
-    }
-
-    /// Downloads (if needed) and loads `variant`, persisting it only on
-    /// success. On failure the previous model is reloaded — its files are
-    /// local, so the revert works offline — and dictation keeps working.
-    func switchModel(to variant: String) async {
-        guard canSwitchModels else { return }
-        let previousVariant = settings.modelVariant
-        guard variant != previousVariant else { return }
-        pendingModelVariant = variant
-        defer { pendingModelVariant = nil }
-
-        // Replace the old service first so its WhisperKit instance is
-        // released before the new model loads (avoids 2x model memory).
-        transcriber = makeTranscriber(variant)
-        do {
-            try await prepareAndLoad()
-            settings.modelVariant = variant
-            state = .idle
-        } catch {
-            transcriber = makeTranscriber(previousVariant)
-            do {
-                try await prepareAndLoad()
-                state = .error("Couldn't switch model: \(error.localizedDescription)")
-            } catch {
-                state = .error("Model setup failed: \(error.localizedDescription)")
-            }
-            scheduleReturnToIdle()
-        }
-    }
-
-    /// Shared model-setup sequence: drives the downloading/loading states
-    /// that the sidebar, Home hero, and overlay already know how to render.
-    private func prepareAndLoad() async throws {
-        state = .downloadingModel(progress: 0)
-        try await transcriber.prepare { [weak self] progress in
-            Task { @MainActor in
-                guard let self, case .downloadingModel = self.state else { return }
-                self.state = .downloadingModel(progress: progress)
-            }
-        }
-        state = .loadingModel
-        try await transcriber.loadModel()
-    }
-
-    // MARK: - Permissions
-
-    private func waitForPermissions() async {
+    private func waitForPermissions() async throws {
         _ = await Permissions.requestMicrophone()
-        if !Permissions.accessibilityGranted {
-            Permissions.promptForAccessibility()
-        }
+        if !Permissions.accessibilityGranted { Permissions.promptForAccessibility() }
         while !(Permissions.microphoneGranted && Permissions.accessibilityGranted) {
-            state = .needsPermissions(
-                microphone: Permissions.microphoneGranted,
-                accessibility: Permissions.accessibilityGranted
-            )
-            try? await Task.sleep(for: .seconds(1))
+            try Task.checkCancellation()
+            state = .needsPermissions(microphone: Permissions.microphoneGranted,
+                                      accessibility: Permissions.accessibilityGranted)
+            try await Task.sleep(for: .seconds(1))
+        }
+    }
+
+    private func startPermissionMonitoring() {
+        permissionTask?.cancel()
+        guard checksPermissions else { return }
+        permissionTask = Task { [weak self] in
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(2)) } catch { return }
+                self?.refreshPermissions()
+            }
+        }
+    }
+
+    private func refreshPermissions() {
+        guard checksPermissions, !isTerminating, setupTask == nil else { return }
+        if !(Permissions.microphoneGranted && Permissions.accessibilityGranted) {
+            if activeSession != nil { cancelDictation() }
+            hotkeyMonitor.stop()
+            if !isFinishingRecording {
+                state = .needsPermissions(microphone: Permissions.microphoneGranted,
+                                          accessibility: Permissions.accessibilityGranted)
+            }
+        } else if case .needsPermissions = state {
+            if modelReady { armReadyState() }
+            else { Task { await start() } }
+        }
+    }
+
+    func cancelDictation() {
+        expiryTask?.cancel()
+        if let setupTask {
+            isCancelling = true
+            setupTask.cancel()
+            deliveryNotice = "Cancelling model setup…"
+            return
+        }
+        guard activeSession != nil || isFinishingRecording else { return }
+        cancellationMessage = cancellationMessage ?? "Dictation cancelled"
+        isCancelling = true
+        let cancelledSession = activeSession
+        activeSession = nil
+        maxDurationTask?.cancel()
+        micWakeTask?.cancel()
+        waveformCoalescer.stop()
+        audioLevel = 0
+        provisionalText = ""
+        if isFinishingRecording {
+            transcriptionTask?.cancel()
+        } else {
+            isFinishingRecording = true
+            state = .transcribing
+            transcriptionTask = Task { [weak self] in
+                guard let self else { return }
+                let captured = await self.recorder.stop()
+                if let session = cancelledSession {
+                    self.recordCancellation(captured, session: session, releasedAt: .now)
+                }
+                self.completeOperation()
+            }
+        }
+        deliveryNotice = "Cancelling… waiting for the current operation to stop."
+    }
+
+    func prepareForTermination() {
+        isTerminating = true
+        cancelDictation()
+        permissionTask?.cancel()
+        expiryTask?.cancel()
+        timeoutTask?.cancel()
+        hotkeyMonitor.stop()
+    }
+
+    func resumeAfterCancelledTermination() {
+        isTerminating = false
+        startPermissionMonitoring()
+        if modelReady && !isFinishingRecording && setupTask == nil { armReadyState() }
+    }
+
+    func drainOperations() async {
+        await setupTask?.value
+        await transcriptionTask?.value
+        await inserter.flushPendingRestoration()
+    }
+
+    private func completeOperation() {
+        timeoutTask?.cancel()
+        timeoutTask = nil
+        isFinishingRecording = false
+        activeSession = nil
+        transcriptionTask = nil
+        recorder.onCaptureReady = nil
+        recorder.onCaptureReadyForGeneration = nil
+        recorder.onInterruption = nil
+        hotkeyMonitor.hotkey = settings.hotkey
+        if isCancelling {
+            isCancelling = false
+            let message = cancellationMessage ?? "Dictation cancelled"
+            cancellationMessage = nil
+            deliveryNotice = message
+            if modelReady { armReadyState() }
+            else { state = .error("Speech model unavailable. Retry setup.") }
         }
     }
 
     // MARK: - Recording lifecycle
 
     func hotkeyPressed() {
+        guard !isTerminating, modelReady, setupTask == nil, !isFinishingRecording, !isCancelling else { return }
         switch state {
-        case .idle: break
-        case .copyReady: state = .idle // a new dictation supersedes the offer
+        case .idle, .copyReady: break
         default: return
         }
+        if checksPermissions && !(Permissions.microphoneGranted && Permissions.accessibilityGranted) {
+            refreshPermissions()
+            return
+        }
+        expiryTask?.cancel()
+        deliveryNotice = nil
+        activeMicrophoneName = nil
+        provisionalText = ""
         micReady = false
         copyConfirmed = false
-        do {
-            try recorder.start(deviceUID: settings.inputDeviceUID)
-        } catch {
+        cancellationMessage = nil
+        let id = UUID()
+        let started = ContinuousClock.now
+        let language = WhisperModelCatalog.supportsMultilingual(settings.modelVariant)
+            ? (settings.transcriptionLanguage == "auto" ? nil : settings.transcriptionLanguage)
+            : "en"
+        var session = Session(
+            id: id, started: started, target: nil,
+            app: NSWorkspace.shared.frontmostApplication, modelVariant: settings.modelVariant,
+            request: TranscriptionRequest(vocabulary: dictionary?.promptWords ?? [],
+                                          language: language,
+                                          promptTokenBudget: settings.vocabularyTokenBudget,
+                                          temperatureFallbackCount: settings.decodingFallbackCount),
+            replacements: dictionary?.compiledReplacementRules ?? [],
+            snippets: settings.expandSnippets ? (snippets?.compiledRules ?? []) : [],
+            keepOnClipboard: settings.copyTranscriptToClipboard, saveHistory: settings.saveHistory)
+        activeSession = session
+        recorder.onCaptureReady = { [weak self] in
+            Task { @MainActor in
+                guard let self, self.activeSession?.id == id,
+                      self.recorder.captureGeneration == nil,
+                      case .recording = self.state else { return }
+                self.micReady = true
+            }
+        }
+        recorder.onCaptureReadyForGeneration = { [weak self] generation in
+            Task { @MainActor in
+                guard let self, self.activeSession?.id == id,
+                      self.recorder.captureGeneration == generation,
+                      case .recording = self.state else { return }
+                self.micReady = true
+            }
+        }
+        recorder.onInterruption = { [weak self] generation, reason in
+            Task { @MainActor in
+                guard let self, self.activeSession?.id == id,
+                      self.recorder.captureGeneration == generation else { return }
+                self.deliveryNotice = reason
+                self.finishRecording()
+            }
+        }
+        do { try recorder.start(deviceUID: settings.inputDeviceUID) }
+        catch {
+            activeSession = nil
             state = .error("Microphone failed: \(error.localizedDescription)")
             scheduleReturnToIdle()
             return
         }
+        // Begin capturing before synchronous AX calls: a slow destination must
+        // not consume the first spoken word. Retain the key-down application;
+        // any app change while starting audio forces the copy fallback.
+        let target = inserter.captureTarget()
+        if target?.processID == session.app?.processIdentifier {
+            session.target = target
+        }
+        activeSession = session
         waveformCoalescer.start()
         audioLevel = 0
-        recordingStartedAt = Date()
+        recordingStartedAt = started
         state = .recording
-        // If the mic hasn't produced audio shortly after starting, nudge the
-        // output side — a dormant Bluetooth link often needs outbound audio
-        // before it will bring the microphone up at all.
         micWakeTask = Task { [weak self, micWakeDelay] in
-            try? await Task.sleep(for: micWakeDelay)
-            guard !Task.isCancelled, let self,
-                  case .recording = self.state, !self.micReady else { return }
+            do { try await Task.sleep(for: micWakeDelay) } catch { return }
+            guard let self, self.activeSession?.id == id,
+                  case .recording = self.state, !self.micReady,
+                  self.recorder.needsBluetoothWake else { return }
             self.linkWaker.wake()
         }
         maxDurationTask = Task { [weak self, maxRecordingSeconds] in
-            try? await Task.sleep(for: .seconds(maxRecordingSeconds))
-            guard !Task.isCancelled else { return }
+            do { try await Task.sleep(for: .seconds(maxRecordingSeconds)) } catch { return }
+            guard self?.activeSession?.id == id else { return }
             self?.finishRecording()
         }
     }
@@ -260,7 +502,7 @@ final class DictationController: ObservableObject {
     }
 
     private func finishRecording() {
-        guard case .recording = state, !isFinishingRecording else { return }
+        guard case .recording = state, !isFinishingRecording, let session = activeSession else { return }
         isFinishingRecording = true
         waveformCoalescer.stop()
         audioLevel = 0
@@ -268,29 +510,54 @@ final class DictationController: ObservableObject {
         maxDurationTask = nil
         micWakeTask?.cancel()
         micWakeTask = nil
-        let heldFor = recordingStartedAt.map { Date().timeIntervalSince($0) } ?? 0
-        let releasedAt = Date()
+        let heldFor = recordingStartedAt.map { $0.duration(to: .now).timeInterval } ?? 0
+        let releasedAt = ContinuousClock.now
         recordingStartedAt = nil
 
         transcriptionTask = Task { [weak self] in
             guard let self else { return }
-            defer { self.isFinishingRecording = false }
+            defer { self.completeOperation() }
             let captured = await self.recorder.stop()
-            await self.transcribeFinalizedCapture(
-                captured,
-                heldFor: heldFor,
-                releasedAt: releasedAt
-            )
+            guard self.activeSession?.id == session.id, !Task.isCancelled else {
+                self.recordCancellation(captured, session: session, releasedAt: releasedAt)
+                return
+            }
+            await self.transcribeFinalizedCapture(captured, heldFor: heldFor,
+                                                 releasedAt: releasedAt, session: session)
+            if self.activeSession?.id != session.id || Task.isCancelled {
+                self.recordCancellation(captured, session: session, releasedAt: releasedAt)
+            }
         }
+    }
+
+    private func recordCancellation(_ captured: CapturedAudio, session: Session, releasedAt: ContinuousClock.Instant) {
+        recordUsage(words: 0, captured: captured,
+                    trimmed: .fallback(captured, reason: .noReliableSpeech),
+                    trimmingDuration: 0, transcriptionDuration: nil, releasedAt: releasedAt,
+                    modelVariant: session.modelVariant, outcome: .cancelled, app: session.app,
+                    sessionID: session.id)
     }
 
     private func transcribeFinalizedCapture(
         _ captured: CapturedAudio,
         heldFor: TimeInterval,
-        releasedAt: Date
+        releasedAt: ContinuousClock.Instant,
+        session: Session
     ) async {
-        let modelVariant = settings.modelVariant
-        guard micReady else {
+        let modelVariant = session.modelVariant
+        activeMicrophoneName = captured.actualDeviceName
+        if captured.usedFallbackDevice { deliveryNotice = "Using the system microphone because the selected input is unavailable." }
+        if captured.interrupted,
+           !captured.transportReady || captured.samples.count < captureConfiguration.minimumRecordingSamples {
+            recordUsage(words: 0, captured: captured,
+                        trimmed: .fallback(captured, reason: .noReliableSpeech),
+                        trimmingDuration: 0, transcriptionDuration: nil, releasedAt: releasedAt,
+                        modelVariant: modelVariant, outcome: .noAudio, app: session.app, sessionID: session.id)
+            state = .error(captured.interruptionReason ?? "Microphone interrupted. Check the input in Settings and record again.")
+            scheduleReturnToIdle()
+            return
+        }
+        guard captured.transportReady else {
             // A quick tap before any audio arrives is just an accidental press;
             // a sustained hold with nothing captured means the mic never woke up.
             if heldFor >= 0.8 {
@@ -304,9 +571,10 @@ final class DictationController: ObservableObject {
                     releasedAt: releasedAt,
                     modelVariant: modelVariant,
                     outcome: .noAudio,
-                    app: NSWorkspace.shared.frontmostApplication
+                    app: session.app,
+                    sessionID: session.id
                 )
-                state = .error("No audio from the microphone — try another input in the Echo menu")
+                state = .error("No audio from the microphone — choose another input in Settings")
                 scheduleReturnToIdle()
             } else {
                 state = .idle
@@ -321,34 +589,44 @@ final class DictationController: ObservableObject {
 
         state = .transcribing
         let trimmer = self.trimmer
-        let trimmingStarted = Date()
+        let trimmingStarted = ContinuousClock.now
         let trimmed = await Task.detached(priority: .userInitiated) {
             trimmer.trim(captured)
         }.value
-        let trimmingDuration = Date().timeIntervalSince(trimmingStarted)
+        let trimmingDuration = trimmingStarted.duration(to: .now).timeInterval
+        guard activeSession?.id == session.id, !Task.isCancelled else { return }
         guard trimmed.samples.count >= captureConfiguration.minimumRecordingSamples else {
             state = .idle
             return
         }
-        let vocabulary = dictionary?.promptWords ?? []
-        let frontApp = NSWorkspace.shared.frontmostApplication
-        let transcriptionStarted = Date()
+        let frontApp = session.app
+        let transcriptionStarted = ContinuousClock.now
+        timeoutTask = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(max(30, captured.duration * 2))) } catch { return }
+            guard let self, self.activeSession?.id == session.id else { return }
+            self.cancellationMessage = "Transcription took too long and was cancelled. Try a shorter recording."
+            self.cancelDictation()
+        }
 
         do {
-            var text = try await transcriber.transcribe(trimmed.samples, vocabulary: vocabulary)
-            let transcriptionDuration = Date().timeIntervalSince(transcriptionStarted)
+            let output = try await transcriber.transcribe(trimmed.samples, request: session.request)
+            guard activeSession?.id == session.id, !Task.isCancelled else { return }
+            var text = output.text
+            let recognizedWords = TextWordCounter.count(text, language: output.language)
+            let transcriptionDuration = transcriptionStarted.duration(to: .now).timeInterval
             let processingStarted = ContinuousClock.now
             for processor in processors {
                 text = processor.process(text)
             }
-            let replacementRules = dictionary?.compiledReplacementRules ?? []
-            let snippetRules = snippets?.compiledRules ?? []
+            let replacementRules = session.replacements
+            let snippetRules = session.snippets
             text = await Task.detached(priority: .userInitiated) {
                 var processed = ReplacementProcessor(rules: replacementRules).process(text)
                 processed = SnippetProcessor(rules: snippetRules).process(processed)
                 return processed
             }.value
             let processingDuration = processingStarted.duration(to: .now).timeInterval
+            guard activeSession?.id == session.id, !Task.isCancelled else { return }
             guard !text.isEmpty else {
                 recordUsage(
                     words: 0,
@@ -359,39 +637,65 @@ final class DictationController: ObservableObject {
                     processingDuration: processingDuration,
                     releasedAt: releasedAt,
                     modelVariant: modelVariant,
-                    outcome: .emptyTranscript,
-                    app: frontApp
+                    outcome: output.diagnostics.isDigitalSilence ? .noSpeech : .emptyTranscript,
+                    app: frontApp,
+                    sessionID: session.id,
+                    output: output,
+                    request: session.request
                 )
                 state = .idle
                 return
             }
             lastTranscript = text
+            lastSessionID = session.id
             let insertionStarted = ContinuousClock.now
-            let keepOnClipboard = settings.copyTranscriptToClipboard
-            if inserter.hasInsertionTarget {
-                let result = inserter.insert(text, keepOnClipboard: keepOnClipboard)
-                if result == .copiedToClipboard {
-                    // Secure input appeared between the check and the paste.
+            let keepOnClipboard = session.keepOnClipboard
+            var outcome: DictationOutcome = .pasteDispatched
+            if output.needsReview || captured.interrupted || !inserter.targetMatches(session.target) {
+                deliveryNotice = captured.interruptionReason ?? (output.needsReview
+                    ? "Review this transcript before copying."
+                    : "The destination changed. Your transcript is ready to copy.")
+                offerCopy(of: text)
+                outcome = .awaitingCopy
+            } else if inserter.hasInsertionTarget {
+                switch inserter.insert(text, keepOnClipboard: keepOnClipboard, target: session.target) {
+                case .pasted: state = .idle
+                case .copiedToClipboard:
                     if keepOnClipboard {
+                        deliveryNotice = "Transcript copied to clipboard."
                         state = .idle
+                        showCopiedConfirmation()
+                        outcome = .copied
                     } else {
                         offerCopy(of: text)
+                        outcome = .awaitingCopy
                     }
-                } else {
-                    state = .idle
+                case .copyRequired, .failed:
+                    deliveryNotice = "Automatic paste was unavailable. Your transcript is ready to copy."
+                    offerCopy(of: text)
+                    outcome = .awaitingCopy
                 }
             } else if keepOnClipboard {
-                inserter.copyToClipboard(text)
-                state = .idle
+                if inserter.copyWithResult(text) {
+                    deliveryNotice = "No text field available. Transcript copied to clipboard."
+                    state = .idle
+                    showCopiedConfirmation()
+                    outcome = .copied
+                } else {
+                    deliveryNotice = "Could not write to the clipboard. Your transcript is ready to copy again."
+                    offerCopy(of: text)
+                    outcome = .awaitingCopy
+                }
             } else {
                 offerCopy(of: text)
+                outcome = .awaitingCopy
             }
             let insertionDuration = insertionStarted.duration(to: .now).timeInterval
-            if settings.saveHistory {
+            if session.saveHistory {
                 transcripts?.add(text)
             }
             recordUsage(
-                words: text.split(whereSeparator: \.isWhitespace).count,
+                words: recognizedWords,
                 captured: captured,
                 trimmed: trimmed,
                 trimmingDuration: trimmingDuration,
@@ -400,20 +704,27 @@ final class DictationController: ObservableObject {
                 insertionDuration: insertionDuration,
                 releasedAt: releasedAt,
                 modelVariant: modelVariant,
-                outcome: .success,
-                app: frontApp
+                outcome: outcome,
+                app: frontApp,
+                sessionID: session.id,
+                expandedWords: TextWordCounter.count(text, language: output.language),
+                output: output,
+                request: session.request
             )
         } catch {
+            guard activeSession?.id == session.id, !Task.isCancelled else { return }
             recordUsage(
                 words: 0,
                 captured: captured,
                 trimmed: trimmed,
                 trimmingDuration: trimmingDuration,
-                transcriptionDuration: Date().timeIntervalSince(transcriptionStarted),
+                transcriptionDuration: transcriptionStarted.duration(to: .now).timeInterval,
                 releasedAt: releasedAt,
                 modelVariant: modelVariant,
                 outcome: .transcriptionFailure,
-                app: frontApp
+                app: frontApp,
+                sessionID: session.id,
+                request: session.request
             )
             state = .error("Transcription failed: \(error.localizedDescription)")
             scheduleReturnToIdle()
@@ -428,19 +739,17 @@ final class DictationController: ObservableObject {
         transcriptionDuration: TimeInterval?,
         processingDuration: TimeInterval? = nil,
         insertionDuration: TimeInterval? = nil,
-        releasedAt: Date,
+        releasedAt: ContinuousClock.Instant,
         modelVariant: String,
         outcome: DictationOutcome,
-        app: NSRunningApplication?
+        app: NSRunningApplication?,
+        sessionID: UUID? = nil,
+        expandedWords: Int? = nil,
+        output: TranscriptionOutput? = nil,
+        request: TranscriptionRequest? = nil
     ) {
-        let totalLatency = Date().timeIntervalSince(releasedAt)
-        usage?.record(
-            words: words,
-            duration: captured.duration,
-            latency: totalLatency,
-            appBundleID: app?.bundleIdentifier,
-            appName: app?.localizedName,
-            metrics: DictationOperationalMetrics(
+        let totalLatency = releasedAt.duration(to: .now).timeInterval
+        var metrics = DictationOperationalMetrics(
                 rawAudioDuration: captured.duration,
                 selectedAudioDuration: Double(trimmed.samples.count) / captured.sampleRate,
                 finalizationDuration: captured.finalizationDuration,
@@ -456,41 +765,83 @@ final class DictationController: ObservableObject {
                 modelVariant: modelVariant,
                 outcome: outcome
             )
+        metrics.transportReadyDuration = captured.readyDuration
+        metrics.captureTailDuration = captured.tailDuration
+        metrics.inputGapCount = captured.inputGapCount
+        metrics.captureInterrupted = captured.interrupted
+        metrics.startupDuration = startupDuration
+        metrics.modelLoadingDuration = modelLoadingDuration
+        metrics.promptConstructionDuration = output?.diagnostics.promptDuration
+        metrics.featureExtractionDuration = output?.diagnostics.featureDuration
+        metrics.encoderDuration = output?.diagnostics.encoderDuration
+        metrics.decoderDuration = output?.diagnostics.decoderDuration
+        metrics.trimReason = trimmed.fallbackReason?.rawValue ?? "trimmed"
+        metrics.language = output?.language ?? request?.language
+        metrics.vocabularyTokenBudget = request?.promptTokenBudget
+        metrics.decodingFallbackCount = request?.temperatureFallbackCount
+        metrics.appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        metrics.buildVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+        metrics.dependencyVersion = "0.18.0"
+        usage?.record(
+            words: words,
+            duration: captured.duration,
+            latency: totalLatency,
+            appBundleID: app?.bundleIdentifier,
+            appName: app?.localizedName,
+            metrics: metrics,
+            expandedWords: expandedWords,
+            sessionID: sessionID
         )
     }
 
     // MARK: - Copy fallback
 
     private func offerCopy(of text: String) {
+        expiryTask?.cancel()
         copyConfirmed = false
         state = .copyReady(text)
-        Task { [weak self] in
-            try? await Task.sleep(for: .seconds(10))
-            guard let self, case .copyReady(text) = self.state else { return }
-            self.state = .idle
-        }
+        // Keep the result until copied or superseded; losing a ten-second offer
+        // made results unrecoverable when history and clipboard retention were off.
     }
 
-    /// Called when the user clicks Copy on the floating pill.
     func copyTranscript() {
-        guard case .copyReady(let text) = state else { return }
-        inserter.copyToClipboard(text)
+        let text: String
+        if case .copyReady(let value) = state { text = value }
+        else { text = lastTranscript }
+        guard !text.isEmpty else { return }
+        guard inserter.copyWithResult(text) else {
+            copyConfirmed = false
+            deliveryNotice = "Could not write to the clipboard. Try Copy again."
+            return
+        }
+        if let id = lastSessionID { usage?.updateOutcome(sessionID: id, outcome: .copied) }
+        deliveryNotice = "Transcript copied to clipboard."
+        showCopiedConfirmation()
+    }
+
+    private func showCopiedConfirmation() {
         copyConfirmed = true
-        Task { [weak self] in
-            try? await Task.sleep(for: .seconds(1.2))
-            guard let self, case .copyReady = self.state else { return }
-            self.state = .idle
+        expiryTask?.cancel()
+        let id = lastSessionID
+        expiryTask = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(1.2)) } catch { return }
+            guard let self, self.lastSessionID == id, self.activeSession == nil else { return }
+            if case .copyReady = self.state { self.state = .idle }
             self.copyConfirmed = false
         }
     }
 
     private func scheduleReturnToIdle(after seconds: Double = 4) {
-        Task { [weak self] in
-            try? await Task.sleep(for: .seconds(seconds))
-            guard let self, case .error = self.state else { return }
-            self.state = .idle
+        expiryTask?.cancel()
+        let errorState = state
+        expiryTask = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(seconds)) } catch { return }
+            guard let self, self.state == errorState, self.modelReady,
+                  self.activeSession == nil, self.setupTask == nil else { return }
+            self.armReadyState()
         }
     }
+
 }
 
 private extension Duration {

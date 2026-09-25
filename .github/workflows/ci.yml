@@ -1,0 +1,32 @@
+name: Validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: macos-26
+    timeout-minutes: 45
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.5.app/Contents/Developer
+      ECHO_ASR_SMOKE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Build, existing checks, and owned audio replay
+        run: scripts/ci.sh
+      - name: Upload content-free evaluation reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: replay-reports
+          path: build/ci/replay-*.json
+          if-no-files-found: ignore

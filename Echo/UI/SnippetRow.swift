@@ -8,6 +8,7 @@ struct SnippetRow: View {
     let onDelete: () -> Void
 
     @State private var isHovering = false
+    @FocusState private var actionsFocused: Bool
 
     var body: some View {
         HStack(spacing: Spacing.s) {
@@ -36,8 +37,7 @@ struct SnippetRow: View {
 
             Spacer(minLength: Spacing.xs)
 
-            if isHovering {
-                HStack(spacing: Spacing.xxs) {
+            HStack(spacing: Spacing.xxs) {
                     Button(action: onEdit) {
                         Image(systemName: "pencil")
                             .font(.system(size: IconSize.small))
@@ -55,8 +55,8 @@ struct SnippetRow: View {
                     .accessibilityLabel("Delete \(snippet.trigger)")
                 }
                 .foregroundStyle(Color.echoSecondary)
-                .transition(.opacity)
-            }
+                .focused($actionsFocused)
+                .opacity(isHovering || actionsFocused ? 1 : 0.65)
         }
         .padding(.horizontal, Spacing.s)
         .padding(.vertical, Spacing.xs)
@@ -73,8 +73,10 @@ struct SnippetRow: View {
         .onHover { hovering in
             withAnimation(Motion.ease) { isHovering = hovering }
         }
-        .accessibilityElement(children: .ignore)
+        .accessibilityElement(children: .contain)
         .accessibilityLabel("Snippet \(snippet.trigger)")
         .accessibilityValue(snippet.expansion)
+        .accessibilityAction(named: "Edit snippet", onEdit)
+        .accessibilityAction(named: "Delete snippet", onDelete)
     }
 }

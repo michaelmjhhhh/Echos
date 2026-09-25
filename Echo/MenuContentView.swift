@@ -8,6 +8,18 @@ struct MenuContentView: View {
     var body: some View {
         Text(controller.state.statusDescription)
 
+        if controller.canCancel {
+            Button(controller.isCancelling ? "Cancelling…" : "Cancel Dictation") { controller.cancelDictation() }
+                .disabled(controller.isCancelling)
+        }
+        if controller.canRetry {
+            Button("Retry Setup") { Task { await controller.retrySetup() } }
+        }
+        if !controller.lastTranscript.isEmpty {
+            Button("Copy Last Transcript") { controller.copyTranscript() }
+        }
+        if let notice = controller.deliveryNotice { Text(notice) }
+
         Divider()
 
         Button("Open Echo") {

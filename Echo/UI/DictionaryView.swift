@@ -35,7 +35,15 @@ struct DictionaryView: View {
     }
 
     var body: some View {
-        Group {
+        VStack(alignment: .leading, spacing: Spacing.s) {
+            PersistenceStatusView(error: dictionary.persistenceError, isSaving: dictionary.isSaving,
+                recoveryAvailable: dictionary.recoveryAvailable,
+                retry: { _ = dictionary.retrySave() }, recover: { _ = dictionary.recoverFromBackup() },
+                startFresh: { _ = dictionary.startFresh() })
+            if !dictionary.conflictingAliases.isEmpty {
+                Text("Conflicting corrections are paused: " + dictionary.conflictingAliases.joined(separator: ", ") + ". Edit these entries to keep one destination per phrase.")
+                    .font(.echo(12)).foregroundStyle(Color.echoWarning)
+            }
             if dictionary.entries.isEmpty {
                 firstRunEmptyState
             } else {
@@ -47,6 +55,7 @@ struct DictionaryView: View {
         .sheet(item: $editorTarget) { target in
             DictionaryEditorSheet(entry: target.entry)
         }
+        .onDisappear { importSummaryClearTask?.cancel() }
     }
 
     private var content: some View {
@@ -183,36 +192,28 @@ struct DictionaryView: View {
 
     // MARK: - Import
 
-    /// Wispr Flow-style bulk import: plain text, one word per line. Invalid
-    /// lines and duplicates are skipped, never fatal.
+    /// Validate the entire import before one durable mutation. Duplicate words are skipped.
     private func importWords() {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.plainText]
         panel.allowsMultipleSelection = false
         panel.message = "Choose a plain-text file with one word per line."
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        guard let content = try? String(contentsOf: url, encoding: .utf8),
-              content.utf8.count <= 3_000_000 else {
-            showImportSummary("Couldn't read that file — use plain text under 3 MB.")
+        guard let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= 3_000_000 else {
+            showImportSummary("Choose a plain-text file under 3 MB.")
             return
         }
-        var added = 0
-        var skipped = 0
-        for line in content.components(separatedBy: .newlines) {
-            let candidate = line.trimmingCharacters(in: .whitespaces)
-            guard !candidate.isEmpty else { continue }
-            switch dictionary.add(word: candidate) {
-            case .success: added += 1
-            case .failure(.full):
-                skipped += 1
-                showImportSummary("Imported \(added) — the dictionary is full.")
+        Task {
+            let content = await Task.detached(priority: .userInitiated) { try? String(contentsOf: url, encoding: .utf8) }.value
+            guard let content, content.utf8.count <= 3_000_000 else {
+                showImportSummary("Could not read the file. Use UTF-8 plain text under 3 MB.")
                 return
-            case .failure: skipped += 1
+            }
+            switch dictionary.importWords(content.components(separatedBy: .newlines)) {
+            case .success(let added): showImportSummary("Imported \(count(added, "word")). Duplicates were skipped.")
+            case .failure(let error): showImportSummary("Import was not saved. \(error.localizedDescription)")
             }
         }
-        var summary = "Imported \(count(added, "word"))"
-        if skipped > 0 { summary += " · \(skipped) skipped" }
-        showImportSummary(summary)
     }
 
     private func showImportSummary(_ text: String) {
@@ -239,6 +240,10 @@ struct DictionaryView: View {
             } actions: {
                 Button("Add word") { editorTarget = .newWord }
                     .buttonStyle(EchoPrimaryButtonStyle())
+                Button("Import…") { importWords() }.buttonStyle(EchoSecondaryButtonStyle())
+            }
+            if let importSummary {
+                Text(importSummary).font(.echo(12)).foregroundStyle(Color.echoSecondary)
             }
             Spacer()
         }

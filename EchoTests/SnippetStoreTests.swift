@@ -32,11 +32,11 @@ final class SnippetStoreTests: XCTestCase {
         XCTAssertEqual(reloaded.entries[1].expansion, "jhmamichael@gmail.com")
     }
 
-    func testAddTrimsWhitespace() {
+    func testAddTrimsTriggerAndPreservesExpansionWhitespace() {
         let store = makeStore()
         store.add(trigger: "  my email address  ", expansion: "  jhmamichael@gmail.com  ")
         XCTAssertEqual(store.entries[0].trigger, "my email address")
-        XCTAssertEqual(store.entries[0].expansion, "jhmamichael@gmail.com")
+        XCTAssertEqual(store.entries[0].expansion, "  jhmamichael@gmail.com  ")
     }
 
     func testRejectsEmptyTrigger() {

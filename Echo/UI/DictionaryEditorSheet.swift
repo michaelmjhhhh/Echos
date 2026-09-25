@@ -5,6 +5,7 @@ import SwiftUI
 /// only dismisses on a successful save.
 struct DictionaryEditorSheet: View {
     let entry: DictionaryEntry?
+    var sourceTranscript: String? = nil
 
     @EnvironmentObject private var dictionary: DictionaryStore
     @Environment(\.dismiss) private var dismiss
@@ -14,6 +15,8 @@ struct DictionaryEditorSheet: View {
     @State private var misspelling = ""
     @State private var correctsMisspelling = false
     @State private var starred = false
+    @State private var allowProtectedText = false
+    @State private var previewInput = ""
     @State private var error: DictionaryError?
     @FocusState private var wordFocused: Bool
     @FocusState private var misspellingFocused: Bool
@@ -36,10 +39,25 @@ struct DictionaryEditorSheet: View {
                 .tracking(-0.2)
                 .foregroundStyle(Color.echoText)
 
+            if let sourceTranscript {
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    EyebrowText(text: "Original transcript")
+                    ScrollView { Text(sourceTranscript).font(.echo(12)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
+                        .frame(maxHeight: 90)
+                    Menu("Choose a misheard word") {
+                        ForEach(Array(Set(sourceTranscript.split(whereSeparator: { $0.isWhitespace }).map(String.init))).sorted(), id: \.self) { candidate in
+                            Button(candidate) { misspelling = candidate.trimmingCharacters(in: .punctuationCharacters); correctsMisspelling = true }
+                        }
+                    }
+                    .menuStyle(.borderlessButton)
+                    footnote("Review the misheard text and the intended spelling before saving a correction.")
+                }
+            }
+
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 EyebrowText(text: "Word")
                 field("Name, brand, or term", text: $word, focus: $wordFocused, counter: true)
-                footnote("Echo listens for this spelling while you dictate.")
+                footnote("This spelling is a recognition hint. Only an explicit correction below guarantees replacement of a matching phrase.")
             }
 
             VStack(alignment: .leading, spacing: Spacing.xs) {
@@ -50,12 +68,14 @@ struct DictionaryEditorSheet: View {
                 }
                 .toggleStyle(.switch)
                 .controlSize(.small)
-                footnote("Echo will replace the misheard version with this word every time.")
+                footnote("Matching phrases are corrected after recognition. Links, email addresses and code are protected by default.")
 
                 if correctsMisspelling {
                     EyebrowText(text: "Echo mishears it as")
                         .padding(.top, Spacing.xxs)
                     field("e.g. cooper netties", text: $misspelling, focus: $misspellingFocused, counter: false)
+                    Toggle("Also match in links, email and code", isOn: $allowProtectedText).font(.echo(12))
+                    rulePreview
                 }
             }
 
@@ -98,6 +118,9 @@ struct DictionaryEditorSheet: View {
                 misspelling = entry.misspelling ?? ""
                 correctsMisspelling = entry.misspelling != nil
                 starred = entry.isStarred
+                allowProtectedText = entry.allowProtectedText
+            } else if sourceTranscript != nil {
+                correctsMisspelling = true
             }
             wordFocused = true
         }
@@ -110,15 +133,26 @@ struct DictionaryEditorSheet: View {
             existing.word = word
             existing.misspelling = cleanMisspelling
             existing.isStarred = starred
+            existing.allowProtectedText = allowProtectedText
             result = dictionary.update(existing)
         } else {
-            result = dictionary.add(word: word, misspelling: cleanMisspelling, starred: starred)
+            result = dictionary.add(word: word, misspelling: cleanMisspelling, starred: starred, allowProtectedText: allowProtectedText)
         }
         switch result {
         case .success:
             dismiss()
         case .failure(let saveError):
             withAnimation(reduceMotion ? nil : Motion.spring) { error = saveError }
+        }
+    }
+
+    private var rulePreview: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            TextField("Try this correction in a sentence", text: $previewInput).textFieldStyle(.roundedBorder).font(.echo(12))
+            let sample = previewInput.isEmpty ? misspelling : previewInput
+            let rules = CompiledReplacementRule(misspelling: misspelling, word: word, allowProtectedText: allowProtectedText).map { [$0] } ?? []
+            Text("Preview: " + ReplacementProcessor(rules: rules).process(sample))
+                .font(.echo(12)).foregroundStyle(Color.echoSecondary).textSelection(.enabled).lineLimit(4)
         }
     }
 

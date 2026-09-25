@@ -42,7 +42,7 @@ enum DictationState: Equatable {
         case .idle: return "Ready — hold \(SettingsStore.shared.hotkey.label) to dictate"
         case .recording: return "Listening…"
         case .transcribing: return "Transcribing…"
-        case .copyReady: return "No text field found — click the pill to copy"
+        case .copyReady: return "Transcript ready — click Copy to use it"
         case .error(let message): return "Error: \(message)"
         }
     }

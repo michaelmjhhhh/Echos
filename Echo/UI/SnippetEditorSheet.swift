@@ -12,6 +12,9 @@ struct SnippetEditorSheet: View {
 
     @State private var trigger = ""
     @State private var expansion = ""
+    @State private var standaloneOnly = false
+    @State private var allowProtectedText = false
+    @State private var previewInput = ""
     @State private var error: SnippetError?
     @FocusState private var triggerFocused: Bool
     @FocusState private var expansionFocused: Bool
@@ -22,7 +25,7 @@ struct SnippetEditorSheet: View {
         return !cleanTrigger.isEmpty
             && cleanTrigger.count <= SnippetStore.maxTriggerLength
             && !cleanExpansion.isEmpty
-            && cleanExpansion.count <= SnippetStore.maxExpansionLength
+            && expansion.count <= SnippetStore.maxExpansionLength
     }
 
     var body: some View {
@@ -53,7 +56,9 @@ struct SnippetEditorSheet: View {
                 .background(RoundedRectangle(cornerRadius: Radius.control, style: .continuous).fill(Color.echoCard))
                 .overlay(RoundedRectangle(cornerRadius: Radius.control, style: .continuous).strokeBorder(Color.echoHairline))
                 .echoFocusRing(triggerFocused)
-                footnote("Echo listens for this phrase while you dictate — on its own or inside a sentence.")
+                Toggle("Only when spoken on its own", isOn: $standaloneOnly).font(.echo(12))
+                footnote("With this enabled, discussing the phrase inside a sentence leaves it unchanged.")
+                Toggle("Also match in links, email and code", isOn: $allowProtectedText).font(.echo(12))
             }
 
             VStack(alignment: .leading, spacing: Spacing.xs) {
@@ -82,6 +87,14 @@ struct SnippetEditorSheet: View {
                 }
             }
 
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                EyebrowText(text: "Preview")
+                TextField("Try the trigger in a sentence", text: $previewInput).textFieldStyle(.roundedBorder).font(.echo(12))
+                let rule = CompiledSnippetRule(trigger: trigger, expansion: expansion, standaloneOnly: standaloneOnly, allowProtectedText: allowProtectedText)
+                Text(SnippetProcessor(rules: rule.map { [$0] } ?? []).process(previewInput.isEmpty ? trigger : previewInput))
+                    .font(.echo(12)).foregroundStyle(Color.echoSecondary).textSelection(.enabled).lineLimit(4)
+            }
+
             if let error {
                 Text(error.localizedDescription)
                     .font(.echo(11))
@@ -108,6 +121,8 @@ struct SnippetEditorSheet: View {
             if let snippet {
                 trigger = snippet.trigger
                 expansion = snippet.expansion
+                standaloneOnly = snippet.standaloneOnly
+                allowProtectedText = snippet.allowProtectedText
             }
             triggerFocused = true
         }
@@ -118,9 +133,11 @@ struct SnippetEditorSheet: View {
         if var existing = snippet {
             existing.trigger = trigger
             existing.expansion = expansion
+            existing.standaloneOnly = standaloneOnly
+            existing.allowProtectedText = allowProtectedText
             result = snippets.update(existing)
         } else {
-            result = snippets.add(trigger: trigger, expansion: expansion)
+            result = snippets.add(trigger: trigger, expansion: expansion, standaloneOnly: standaloneOnly, allowProtectedText: allowProtectedText)
         }
         switch result {
         case .success:

@@ -17,6 +17,11 @@ struct HistoryView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             header
+            PersistenceStatusView(error: transcripts.persistenceError, isSaving: transcripts.isSaving,
+                recoveryAvailable: transcripts.recoveryAvailable,
+                retry: { Task { _ = await transcripts.retrySave() } },
+                recover: { _ = transcripts.recoverFromBackup() },
+                startFresh: { Task { _ = await transcripts.startFresh() } })
 
             if filtered.isEmpty {
                 emptyState
@@ -92,9 +97,9 @@ struct HistoryView: View {
                         "Delete all \(transcripts.entries.count) transcripts?",
                         isPresented: $confirmingClear
                     ) {
-                        Button("Delete All", role: .destructive) { transcripts.clear() }
+                        Button("Delete All", role: .destructive) { Task { _ = await transcripts.clearPersisted() } }
                     } message: {
-                        Text("History lives only on this Mac and can't be recovered once deleted.")
+                        Text("This deletes saved transcripts on this Mac. Usage statistics are managed separately in Settings.")
                     }
             }
         }

@@ -61,6 +61,7 @@ struct MainWindowView: View {
     @EnvironmentObject private var settings: SettingsStore
     @EnvironmentObject private var transcripts: TranscriptStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.openWindow) private var openWindow
     @State private var section: MainSection = .home
     @State private var microphoneName = "System Default"
 
@@ -95,16 +96,26 @@ struct MainWindowView: View {
         .background(sectionShortcuts)
         .tint(Color.echoAccent)
         .frame(minWidth: 720, minHeight: 560)
+        .onAppear {
+            controller.openMainWindow = {
+                openWindow(id: "main")
+                NSApp.activate(ignoringOtherApps: true)
+            }
+        }
         // Resolve the mic name only when the selection changes — never in a
         // body computed property. Core Audio HAL queries are synchronous and
         // block the main thread (and with it the whole UI) whenever coreaudiod
         // stalls, so they must not run on every render.
         .onChange(of: settings.inputDeviceUID, initial: true) { _, uid in
-            microphoneName = Self.resolveMicrophoneName(uid: uid)
+            Task { microphoneName = await Task.detached(priority: .utility) { Self.resolveMicrophoneName(uid: uid) }.value }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: AudioInputDevices.changedNotification)) { _ in
+            let uid = settings.inputDeviceUID
+            Task { microphoneName = await Task.detached(priority: .utility) { Self.resolveMicrophoneName(uid: uid) }.value }
         }
     }
 
-    static func resolveMicrophoneName(uid: String?) -> String {
+    nonisolated static func resolveMicrophoneName(uid: String?) -> String {
         guard let uid else { return "System Default" }
         return AudioInputDevices.all().first { $0.uid == uid }?.name ?? "System Default"
     }
@@ -168,7 +179,7 @@ struct MainWindowView: View {
                 Image(systemName: "mic")
                     .font(.system(size: IconSize.caption))
                     .foregroundStyle(Color.echoSecondary)
-                Text(microphoneName)
+                Text(controller.activeMicrophoneName ?? microphoneName)
                     .font(.echo(11))
                     .foregroundStyle(Color.echoSecondary)
                     .lineLimit(1)
@@ -186,7 +197,7 @@ struct MainWindowView: View {
         )
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Echo status")
-        .accessibilityValue("\(shortStatus), microphone \(microphoneName)")
+        .accessibilityValue("\(shortStatus), microphone \(controller.activeMicrophoneName ?? microphoneName)")
     }
 
     private var statusColor: Color {
@@ -198,6 +209,7 @@ struct MainWindowView: View {
     }
 
     private var shortStatus: String {
+        if controller.isCancelling { return "Cancelling" }
         switch controller.state {
         case .launching: return "Starting…"
         case .needsPermissions: return "Needs permissions"

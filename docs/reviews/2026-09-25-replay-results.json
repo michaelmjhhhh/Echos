@@ -1,0 +1,305 @@
+{
+  "schema": 1,
+  "recordedAt": "2026-09-25T04:56:03Z",
+  "purpose": "Synthetic integration checks of application-layer ASR behavior with unchanged installed model weights. This is not a representative accuracy benchmark or a before/after overall performance claim.",
+  "environment": {
+    "operatingSystem": "Version 26.3 (Build 25D125)",
+    "processorCount": 10,
+    "physicalMemoryBytes": 17179869184,
+    "whisperKitVersion": "0.18.0"
+  },
+  "generation": {
+    "script": "scripts/make-short-speech-fixtures.py",
+    "voice": "Samantha",
+    "wordsPerMinute": 240,
+    "sampleRate": 16000,
+    "format": "mono signed 16-bit PCM WAV",
+    "spokenWord": "Yes",
+    "quietAmplitudeMultiplier": 0.02,
+    "shortSeconds": [
+      0.3,
+      0.5,
+      0.8,
+      1,
+      1.2
+    ],
+    "reproductionCheck": {
+      "audioFilesCompared": 15,
+      "identicalSHA256Count": 15
+    }
+  },
+  "commands": [
+    "python3 scripts/make-short-speech-fixtures.py --output /tmp/echo-short-speech",
+    "EchoEvaluate --manifest /tmp/echo-short-speech/manifest.json --model distil-whisper_distil-large-v3_594MB --repeat 2 --prompt-budgets 0,25,50,100,200 --trim both --include-text --output /tmp/echo-short-speech/distil-final.json",
+    "EchoEvaluate --manifest /tmp/echo-short-speech/boundary-manifest.json --model distil-whisper_distil-large-v3_594MB --repeat 1 --prompt-budgets 0 --trim off --include-text --output /tmp/echo-short-speech/distil-boundary.json",
+    "EchoEvaluate --manifest /tmp/echo-short-speech/manifest.json --model openai_whisper-tiny.en --repeat 1 --prompt-budgets 0 --trim off --include-text --output /tmp/echo-short-speech/tiny-short.json"
+  ],
+  "finalDefaultModelMatrix": {
+    "model": "distil-whisper_distil-large-v3_594MB",
+    "hashes": {
+      "executableSHA256": "e07c4b44d262124cf854be25b975cdc547aadaf07ec12fb30b10ec13baecc855",
+      "manifestSHA256": "295483bf43d26653c4ee8014f2a0e21916234106f4c590968ac3af1293e989a6",
+      "modelFilesSHA256": "da94f53244964346a18e2fd273c2556100997b4a4a1b97053cb552e07b27d481",
+      "tokenizerFilesSHA256": "3ab25682a0c71be8a3a835e102e1aab2860de25241b5035bc6744770061b99c1"
+    },
+    "language": "en",
+    "fallbackLimit": 5,
+    "repetitions": 2,
+    "trimModes": [
+      "off",
+      "on"
+    ],
+    "vocabulary": [
+      "Echo",
+      "OpenAI"
+    ],
+    "hintContainsReferenceWord": false,
+    "rows": 160,
+    "speechRows": 120,
+    "digitalSilenceRows": 40,
+    "failedCases": 0,
+    "rawWordEditDistance": 0,
+    "finalWordEditDistance": 0,
+    "referenceSpeechWordCount": 120,
+    "rawWER": 0,
+    "finalWER": 0,
+    "falseSpeechRejections": 0,
+    "digitalSilenceFalseInsertions": 0,
+    "promptCacheHits": 71,
+    "promptCacheEvaluatedSpeechRows": 120,
+    "timings": {
+      "asrSeconds": {
+        "count": 120,
+        "medianSeconds": 0.6856594374985434,
+        "p95NearestRankSeconds": 0.7105004166951403
+      },
+      "featureSeconds": {
+        "count": 120,
+        "medianSeconds": 0.007035017013549805,
+        "p95NearestRankSeconds": 0.008401036262512207
+      },
+      "encoderSeconds": {
+        "count": 120,
+        "medianSeconds": 0.600177526473999,
+        "p95NearestRankSeconds": 0.6185610294342041
+      },
+      "decoderSeconds": {
+        "count": 120,
+        "medianSeconds": 0.0796816349029541,
+        "p95NearestRankSeconds": 0.09069716930389404
+      },
+      "inferenceSeconds": {
+        "count": 120,
+        "medianSeconds": 0.6855233749956824,
+        "p95NearestRankSeconds": 0.7101106666377746
+      }
+    },
+    "byPromptBudget": [
+      {
+        "budget": 0,
+        "actualTokenCounts": [
+          0
+        ],
+        "inference": {
+          "count": 24,
+          "medianSeconds": 0.6577072916552424,
+          "p95NearestRankSeconds": 0.6829635833273642
+        }
+      },
+      {
+        "budget": 25,
+        "actualTokenCounts": [
+          4
+        ],
+        "inference": {
+          "count": 24,
+          "medianSeconds": 0.6895888541766908,
+          "p95NearestRankSeconds": 0.7180517499800771
+        }
+      },
+      {
+        "budget": 50,
+        "actualTokenCounts": [
+          4
+        ],
+        "inference": {
+          "count": 24,
+          "medianSeconds": 0.6881857499829493,
+          "p95NearestRankSeconds": 0.7184464582824148
+        }
+      },
+      {
+        "budget": 100,
+        "actualTokenCounts": [
+          4
+        ],
+        "inference": {
+          "count": 24,
+          "medianSeconds": 0.6904546041623689,
+          "p95NearestRankSeconds": 0.7111096666776575
+        }
+      },
+      {
+        "budget": 200,
+        "actualTokenCounts": [
+          4
+        ],
+        "inference": {
+          "count": 24,
+          "medianSeconds": 0.6865333333262242,
+          "p95NearestRankSeconds": 0.6964195416658185
+        }
+      }
+    ],
+    "audioHashes": {
+      "yes-0.3": "beab15f979462d5c6fce1620d10cd8c8c07d59eac39ef905a632e4ac71ec001a",
+      "yes-0.5": "da0a548faf9d5556aae0c7b94afd734aa4c8e85145ef090451d7a5b2a9030d7d",
+      "yes-0.8": "cb0910369e146e51ab5aabf794aa183cb65008a3be04acac2b55278dd9d087e3",
+      "yes-1.0": "fb31dbace111fbc71bb258dab60478253518bf2c11b6f77ea438b2663314d004",
+      "yes-1.2": "3acca1725e5f23b80f849f0f9ccb3081c58203bdd685dd554e37c861b6be2c37",
+      "silence-0.3": "6e00afcc0bfb3f0faf04f3e8ff8c1582fcdefd7a438c57db561f24d5fb205d89",
+      "silence-1.2": "7ba33e43781d9c8216ef89e004f4c275af2b0e74970b8e69377921ec5e5321f1",
+      "quiet-yes-1.2": "66f90761f4b6091173bd985e9134953bc9f5308b7e6ec4269fa08a9a9af3cbce"
+    },
+    "decoderMetric": "decoder init + prefill + prediction + nonPrediction timings; upstream decodingLoop includes encoding and is not used as decoder-only time"
+  },
+  "loadAndWarmup": {
+    "initialObservedDefaultModelSeconds": 12.27818299998762,
+    "laterWarmCachedDefaultModelSeconds": 1.3898418750031851,
+    "initialObservedTinySeconds": 3.3217060833703727,
+    "caveat": "Single observations, not controlled cold-start percentiles. CoreML specialization/cache state and order affect loading. Warmup uses a real inference window with a bounded token budget."
+  },
+  "boundaryComparison": {
+    "beforePolicy": "Only clips at most one second padded; original long-tail one-second guard could skip real audio.",
+    "afterPolicy": "Append exactly one second of synthetic silence to every non-silent clip; retain one-second upstream guard.",
+    "sameModelHash": true,
+    "modelFilesSHA256": "da94f53244964346a18e2fd273c2556100997b4a4a1b97053cb552e07b27d481",
+    "hashesAfter": {
+      "executableSHA256": "e07c4b44d262124cf854be25b975cdc547aadaf07ec12fb30b10ec13baecc855",
+      "manifestSHA256": "538fbc5480d112345d5c544a85a982a3d94cbac281054a7446d57aa39fb40da1",
+      "modelFilesSHA256": "da94f53244964346a18e2fd273c2556100997b4a4a1b97053cb552e07b27d481",
+      "tokenizerFilesSHA256": "3ab25682a0c71be8a3a835e102e1aab2860de25241b5035bc6744770061b99c1"
+    },
+    "cases": [
+      {
+        "id": "boundary-29",
+        "referenceWords": 2,
+        "beforeOutputWords": 1,
+        "afterOutputWords": 1,
+        "beforeEncoderRuns": 1,
+        "afterEncoderRuns": 1,
+        "beforeWordEdits": 1,
+        "afterWordEdits": 1,
+        "beforeInferenceSeconds": 0.6607602500007488,
+        "afterInferenceSeconds": 0.6607902083196677,
+        "audioSHA256": "24772f3fdcda1fec7d03252332acb8ecef296218265b32e5cc85f67d9183f37f"
+      },
+      {
+        "id": "boundary-30",
+        "referenceWords": 2,
+        "beforeOutputWords": 1,
+        "afterOutputWords": 1,
+        "beforeEncoderRuns": 1,
+        "afterEncoderRuns": 1,
+        "beforeWordEdits": 1,
+        "afterWordEdits": 1,
+        "beforeInferenceSeconds": 0.6568405833677389,
+        "afterInferenceSeconds": 0.660399749991484,
+        "audioSHA256": "4b2682efd767f5a9168408b1ac128b1694cbef277e735cc7e060f176075cc28f"
+      },
+      {
+        "id": "boundary-31",
+        "referenceWords": 2,
+        "beforeOutputWords": 1,
+        "afterOutputWords": 2,
+        "beforeEncoderRuns": 1,
+        "afterEncoderRuns": 2,
+        "beforeWordEdits": 1,
+        "afterWordEdits": 0,
+        "beforeInferenceSeconds": 0.6605927500058897,
+        "afterInferenceSeconds": 1.3226806666934863,
+        "audioSHA256": "202baa7d9fc1eab0f027b1df258012414fdcd21b286fcc73bf894f8a26c99e4f"
+      },
+      {
+        "id": "boundary-59",
+        "referenceWords": 3,
+        "beforeOutputWords": 2,
+        "afterOutputWords": 2,
+        "beforeEncoderRuns": 2,
+        "afterEncoderRuns": 2,
+        "beforeWordEdits": 1,
+        "afterWordEdits": 1,
+        "beforeInferenceSeconds": 1.3244080833392218,
+        "afterInferenceSeconds": 1.3209779166500084,
+        "audioSHA256": "d6754649254474e5e1784e82635090e35507a1b00c01be7f2304828510cb77f6"
+      },
+      {
+        "id": "boundary-60",
+        "referenceWords": 3,
+        "beforeOutputWords": 2,
+        "afterOutputWords": 2,
+        "beforeEncoderRuns": 2,
+        "afterEncoderRuns": 2,
+        "beforeWordEdits": 1,
+        "afterWordEdits": 1,
+        "beforeInferenceSeconds": 1.3006559166824445,
+        "afterInferenceSeconds": 1.3194275833666325,
+        "audioSHA256": "80bce3bea4c01c579a5507d12b5a5bdcd6b6b0ab3daab2533a802801fa3443ac"
+      },
+      {
+        "id": "boundary-61",
+        "referenceWords": 3,
+        "beforeOutputWords": 2,
+        "afterOutputWords": 3,
+        "beforeEncoderRuns": 2,
+        "afterEncoderRuns": 3,
+        "beforeWordEdits": 1,
+        "afterWordEdits": 0,
+        "beforeInferenceSeconds": 1.3095616250066087,
+        "afterInferenceSeconds": 1.9788456666865386,
+        "audioSHA256": "831ca03de25d3bf0e7b42a51ca086469face4d658119eda4740b44e4d64ce6fc"
+      }
+    ],
+    "hashesBefore": {
+      "executableSHA256": "04acf1b9c04461287ed159ad465be68a1ed28deec1a34f04d4b0de18608d3f7c",
+      "manifestSHA256": "538fbc5480d112345d5c544a85a982a3d94cbac281054a7446d57aa39fb40da1",
+      "modelFilesSHA256": "da94f53244964346a18e2fd273c2556100997b4a4a1b97053cb552e07b27d481",
+      "tokenizerFilesSHA256": "3ab25682a0c71be8a3a835e102e1aab2860de25241b5035bc6744770061b99c1"
+    }
+  },
+  "tinySmoke": {
+    "model": "openai_whisper-tiny.en",
+    "hashes": {
+      "executableSHA256": "0ffff5e4a2ac9bcf2f906b874b90490a1e5629bc9d74c9165087894b3d17b606",
+      "manifestSHA256": "295483bf43d26653c4ee8014f2a0e21916234106f4c590968ac3af1293e989a6",
+      "modelFilesSHA256": "81609fc38b4291c8a65fe2800db8043d4f486dcf046d44b43ac48317195f023e"
+    },
+    "rows": 8,
+    "failedCases": 0,
+    "wordEdits": 0,
+    "speechInference": {
+      "count": 6,
+      "medianSeconds": 0.030725062504643574,
+      "p95NearestRankSeconds": 0.0319900416652672
+    },
+    "policyAtRun": "Short-clip-only padding, before long-boundary repair; confirms English tokenizer and short inference path only."
+  },
+  "limits": [
+    "All speech is one synthesized English word. No representative human speech, accents, names, numbers, code-switching, music, or real ambient-noise accuracy claim is supported.",
+    "Budgets 25 through 200 all used four actual prompt tokens. These runs do not measure large dictionaries or long prompts.",
+    "The 31/61-second boundary fix performs work that was previously skipped; its additional latency restores missing output rather than constituting a speed regression on equivalent output.",
+    "The model still collapses distant repeated Yes utterances within one window on 29/30/59/60-second fixtures. That behavior was unchanged, so the boundary corpus has not reached zero WER.",
+    "Digital silence means exact zero samples. Quiet speech is preserved; rejecting fan noise/music/background conversation remains a calibrated evaluation task.",
+    "No live microphone, Bluetooth/USB route, physical hotkey, Accessibility target, clipboard, signing/notarization, or network failure scenario is established by these offline runs.",
+    "Model and tokenizer files were loaded from installed local caches with prepareInstalled; no weights were downloaded or changed.",
+    "Voice synthesis output can differ across macOS/voice revisions; use recorded audio hashes to identify exact fixture equivalence.",
+    "The before-boundary executable is identified by its hash in the retained local raw result; rebuilding current source reproduces only the corrected after behavior."
+  ],
+  "rawLocalEvidence": [
+    "/tmp/echo-synthetic-replay/distil-final-matrix.json",
+    "/tmp/echo-synthetic-replay/distil-boundary-before.json",
+    "/tmp/echo-synthetic-replay/distil-boundary-after.json",
+    "/tmp/echo-synthetic-replay/tiny-short.json",
+    "/tmp/echo-synthetic-replay/model-hashes.json"
+  ]
+}

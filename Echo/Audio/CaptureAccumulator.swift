@@ -27,13 +27,56 @@ final class CaptureAccumulator: @unchecked Sendable {
     private var convertedBufferCount = 0
     private var droppedBufferCount = 0
     private var captureReadySignaled = false
+    private var speechObserved = false
+    private var startUptime: TimeInterval = 0
+    private var readyDuration: TimeInterval?
+    private var actualDeviceUID: String?
+    private var actualDeviceName: String?
+    private var usedFallbackDevice = false
+    private var interruptionReason: String?
+    private var inputGapCount = 0
+    private var tailDuration: TimeInterval = 0
+
+    var currentGeneration: CaptureGeneration? {
+        condition.lock()
+        defer { condition.unlock() }
+        return phase == .idle ? nil : generation
+    }
+
+    func setDevice(uid: String?, name: String?, usedFallback: Bool) {
+        condition.lock()
+        defer { condition.unlock() }
+        actualDeviceUID = uid
+        actualDeviceName = name
+        usedFallbackDevice = usedFallback
+    }
+
+    func markInterruption(_ reason: String) -> CaptureGeneration? {
+        condition.lock()
+        defer { condition.unlock() }
+        guard phase != .idle else { return nil }
+        interruptionReason = reason
+        return generation
+    }
+
+    func noteInputGap() {
+        condition.lock()
+        if phase != .idle { inputGapCount += 1 }
+        condition.unlock()
+    }
+
+    func setTailDuration(_ duration: TimeInterval) {
+        condition.lock()
+        tailDuration = duration
+        condition.unlock()
+    }
 
     init(configuration: CaptureConfiguration = .default) {
         self.configuration = configuration
     }
 
     @discardableResult
-    func start() -> CaptureGeneration {
+    func start(startedAt: TimeInterval = ProcessInfo.processInfo.systemUptime) -> CaptureGeneration {
         condition.lock()
         defer { condition.unlock() }
         guard phase == .idle else { return generation }
@@ -44,6 +87,12 @@ final class CaptureAccumulator: @unchecked Sendable {
         convertedBufferCount = 0
         droppedBufferCount = 0
         captureReadySignaled = false
+        speechObserved = false
+        startUptime = startedAt
+        readyDuration = nil
+        interruptionReason = nil
+        inputGapCount = 0
+        tailDuration = 0
         phase = .capturing
         return generation
     }
@@ -82,36 +131,44 @@ final class CaptureAccumulator: @unchecked Sendable {
             return CaptureAppendResult(accepted: false, signalCaptureReady: false)
         }
 
+        guard !buffer.isEmpty else {
+            return CaptureAppendResult(accepted: false, signalCaptureReady: false)
+        }
+        guard buffer.allSatisfy(\.isFinite) else {
+            droppedBufferCount += 1
+            return CaptureAppendResult(accepted: false, signalCaptureReady: false)
+        }
         samples.append(contentsOf: buffer)
         convertedBufferCount += 1
-        let signalReady = !captureReadySignaled && rms > 0.0001
+        speechObserved = speechObserved || rms > 0.0001
+        // Transport readiness is independent of acoustic energy. A silent mic
+        // is working; speech presence is separate metadata, never a validity gate.
+        let signalReady = !captureReadySignaled
         if signalReady {
             captureReadySignaled = true
+            readyDuration = ProcessInfo.processInfo.systemUptime - startUptime
         }
         return CaptureAppendResult(accepted: true, signalCaptureReady: signalReady)
     }
 
     func stop() async -> CapturedAudio {
-        let started = Date()
-        condition.lock()
-        guard phase == .capturing else {
-            let empty = CapturedAudio(
-                generation: generation,
-                samples: [],
-                convertedBufferCount: 0,
-                droppedBufferCount: 0,
-                finalizationTimedOut: false,
-                finalizationDuration: Date().timeIntervalSince(started),
-                sampleRate: configuration.sampleRate
-            )
-            condition.unlock()
-            return empty
-        }
-        phase = .stopping
-        let stoppingGeneration = generation
-        condition.unlock()
-
+        let started = ProcessInfo.processInfo.systemUptime
         return await withCheckedContinuation { continuation in
+            condition.lock()
+            guard phase == .capturing else {
+                let empty = CapturedAudio(
+                    generation: generation, samples: [], convertedBufferCount: 0,
+                    droppedBufferCount: 0, finalizationTimedOut: false,
+                    finalizationDuration: ProcessInfo.processInfo.systemUptime - started,
+                    sampleRate: configuration.sampleRate
+                )
+                condition.unlock()
+                continuation.resume(returning: empty)
+                return
+            }
+            phase = .stopping
+            let stoppingGeneration = generation
+            condition.unlock()
             finalizationQueue.async { [self] in
                 condition.lock()
                 let deadline = Date().addingTimeInterval(configuration.finalizationTimeout)
@@ -123,8 +180,18 @@ final class CaptureAccumulator: @unchecked Sendable {
                     convertedBufferCount: convertedBufferCount,
                     droppedBufferCount: droppedBufferCount,
                     finalizationTimedOut: timedOut,
-                    finalizationDuration: Date().timeIntervalSince(started),
-                    sampleRate: configuration.sampleRate
+                    finalizationDuration: ProcessInfo.processInfo.systemUptime - started + tailDuration,
+                    sampleRate: configuration.sampleRate,
+                    transportReady: captureReadySignaled,
+                    speechObserved: speechObserved,
+                    actualDeviceUID: actualDeviceUID,
+                    actualDeviceName: actualDeviceName,
+                    usedFallbackDevice: usedFallbackDevice,
+                    interrupted: interruptionReason != nil,
+                    interruptionReason: interruptionReason,
+                    inputGapCount: inputGapCount,
+                    readyDuration: readyDuration,
+                    tailDuration: tailDuration
                 )
                 phase = .idle
                 samples = []

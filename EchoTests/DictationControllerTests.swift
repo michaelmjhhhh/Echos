@@ -326,7 +326,7 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertEqual(totals.words, 3)
         let metrics = usage.latestOperationalMetricsForTesting()
         XCTAssertNotNil(metrics)
-        XCTAssertEqual(metrics?.outcome, .success)
+        XCTAssertEqual(metrics?.outcome, .pasteDispatched)
         XCTAssertEqual(metrics!.rawAudioDuration, 2, accuracy: 0.0001)
         XCTAssertNotNil(metrics?.processingDuration)
         XCTAssertNotNil(metrics?.insertionDuration)
