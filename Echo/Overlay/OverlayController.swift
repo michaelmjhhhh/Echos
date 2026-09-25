@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 /// Owns the floating, non-activating panel that shows dictation state near the
-/// bottom of the screen (Wispr Flow-style). Click-through, joins all Spaces,
+/// bottom of the screen. Joins all Spaces,
 /// and never steals focus from the app being dictated into.
 @MainActor
 final class OverlayController {
@@ -18,27 +18,37 @@ final class OverlayController {
         set { model.onCopy = newValue }
     }
 
+    var onCancel: (() -> Void)? {
+        get { model.onCancel }
+        set { model.onCancel = newValue }
+    }
+
+    var onOpen: (() -> Void)? {
+        get { model.onOpen }
+        set { model.onOpen = newValue }
+    }
+
     func update(state: DictationState, level: Float, micReady: Bool, copyConfirmed: Bool) {
         model.level = level
         model.micReady = micReady
+        let confirmationChanged = model.copyConfirmed != copyConfirmed
         model.copyConfirmed = copyConfirmed
-        guard state != model.state else { return }
+        guard state != model.state || confirmationChanged else { return }
         model.state = state
 
-        // The pill is click-through except when it's offering the Copy button.
-        if case .copyReady = state {
-            panel.ignoresMouseEvents = false
-        } else {
-            panel.ignoresMouseEvents = true
-        }
+        panel.ignoresMouseEvents = false
 
         switch state {
         case .recording, .transcribing, .copyReady, .error:
+            show()
+        case .idle where copyConfirmed:
             show()
         default:
             hide()
         }
     }
+
+    func updateCancellation(_ cancelling: Bool) { model.isCancelling = cancelling }
 
     private func makePanel() -> NSPanel {
         let panel = NSPanel(
@@ -83,13 +93,17 @@ final class OverlayController {
             context.duration = reduceMotion ? 0 : Motion.overlayFadeOut
             panel.animator().alphaValue = 0
         }, completionHandler: { [weak self] in
-            guard let self, !self.isVisible else { return }
-            self.panel.orderOut(nil)
+            Task { @MainActor in
+                guard let self, !self.isVisible else { return }
+                self.panel.orderOut(nil)
+            }
         })
     }
 
     private func position() {
-        guard let screen = NSScreen.main ?? NSScreen.screens.first else { return }
+        let pointer = NSEvent.mouseLocation
+        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(pointer) })
+                ?? NSScreen.main ?? NSScreen.screens.first else { return }
         let visible = screen.visibleFrame
         panel.setFrameOrigin(NSPoint(
             x: visible.midX - Self.panelSize.width / 2,

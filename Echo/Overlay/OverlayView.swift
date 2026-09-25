@@ -6,7 +6,10 @@ final class OverlayModel: ObservableObject {
     @Published var level: Float = 0
     @Published var micReady = false
     @Published var copyConfirmed = false
+    @Published var isCancelling = false
     var onCopy: (() -> Void)?
+    var onCancel: (() -> Void)?
+    var onOpen: (() -> Void)?
 }
 
 /// The floating pill shown near the bottom of the screen while dictating —
@@ -26,6 +29,7 @@ struct OverlayView: View {
     private var isVisibleState: Bool {
         switch model.state {
         case .recording, .transcribing, .copyReady, .error: return true
+        case .idle: return model.copyConfirmed
         default: return false
         }
     }
@@ -45,11 +49,19 @@ struct OverlayView: View {
                         .accessibilityHidden(true)
                     Text("Starting mic…")
                 }
+                Button("Cancel") { model.onCancel?() }
+                    .buttonStyle(.plain)
+                    .disabled(model.isCancelling)
+                    .accessibilityLabel("Cancel dictation")
             case .transcribing:
                 ProgressView()
                     .controlSize(.small)
                     .accessibilityHidden(true)
-                Text("Transcribing…")
+                Text(model.isCancelling ? "Cancelling…" : "Transcribing…")
+                Button("Cancel") { model.onCancel?() }
+                    .buttonStyle(.plain)
+                    .disabled(model.isCancelling)
+                    .accessibilityLabel("Cancel transcription")
             case .copyReady(let transcript):
                 if model.copyConfirmed {
                     Image(systemName: "checkmark")
@@ -74,6 +86,14 @@ struct OverlayView: View {
                     .accessibilityHidden(true)
                 Text(message)
                     .lineLimit(1)
+                    .help(message)
+                Button("Details") { model.onOpen?() }
+                    .buttonStyle(.plain)
+            case .idle where model.copyConfirmed:
+                Image(systemName: "checkmark")
+                    .foregroundStyle(Color.echoAccentFixed)
+                    .accessibilityHidden(true)
+                Text("Copied to clipboard")
             default:
                 EmptyView()
             }
@@ -94,7 +114,7 @@ struct OverlayView: View {
         .environment(\.colorScheme, .dark)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Echo dictation")
-        .onChange(of: isVisibleState) { _, visible in
+        .onChange(of: isVisibleState, initial: true) { _, visible in
             if visible {
                 if reduceMotion {
                     entered = true
