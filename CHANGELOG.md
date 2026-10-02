@@ -4,6 +4,14 @@ All user-facing and engineering changes are recorded here. Model weights are unc
 
 ## [Unreleased]
 
+### Changed
+
+- Use the current transcription, insertion, history-persistence, and capture-generation interfaces throughout the app and existing test adapters. Usage checks now read the published snapshots used by the UI.
+
+### Removed
+
+- Remove unused model-installation state and inactive-model repair, obsolete rule and transcription-segment projections, and redundant card and history-flush wrappers. Active-model repair and persistence recovery remain available.
+
 ## [0.4.0] - 2026-09-25
 
 ### Added

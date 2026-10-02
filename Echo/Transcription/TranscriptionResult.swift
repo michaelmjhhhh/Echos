@@ -14,14 +14,6 @@ struct TranscriptionRequest: Sendable {
     }
 }
 
-struct TranscriptionSegmentInfo: Sendable {
-    let text: String
-    let start: TimeInterval
-    let end: TimeInterval
-    let averageLogProbability: Float
-    let compressionRatio: Float
-}
-
 /// These are decoder diagnostics, not calibrated confidence probabilities.
 /// WhisperKit 0.18 does not provide a usable no-speech probability.
 struct TranscriptionDiagnostics: Sendable {
@@ -46,14 +38,12 @@ struct TranscriptionDiagnostics: Sendable {
 struct TranscriptionOutput: Sendable {
     var text: String
     var language: String?
-    var segments: [TranscriptionSegmentInfo]
     var diagnostics: TranscriptionDiagnostics
     var needsReview: Bool
 
-    init(text: String, language: String? = nil, segments: [TranscriptionSegmentInfo] = [], diagnostics: TranscriptionDiagnostics = .init(), needsReview: Bool = false) {
+    init(text: String, language: String? = nil, diagnostics: TranscriptionDiagnostics = .init(), needsReview: Bool = false) {
         self.text = text
         self.language = language
-        self.segments = segments
         self.diagnostics = diagnostics
         self.needsReview = needsReview
     }

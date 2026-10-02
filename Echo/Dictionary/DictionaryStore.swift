@@ -242,14 +242,6 @@ final class DictionaryStore: ObservableObject {
         (entries.filter(\.isStarred) + entries.filter { !$0.isStarred }).map(\.word)
     }
 
-    /// Replacement rules, longest misspelling first so overlapping rules
-    /// can't clobber each other ("cooper netties" before "cooper").
-    var replacementRules: [(misspelling: String, word: String)] {
-        entries
-            .compactMap { entry in entry.misspelling.map { ($0, entry.word) } }
-            .sorted { $0.0.count == $1.0.count ? TextRuleMatcher.key($0.0) < TextRuleMatcher.key($1.0) : $0.0.count > $1.0.count }
-    }
-
     /// Older installations could save one alias with several destinations. Keep all
     /// editable entries, but disable these ambiguous rules until the conflict is fixed.
     var conflictingAliases: [String] {

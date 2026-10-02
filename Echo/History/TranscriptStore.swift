@@ -75,12 +75,9 @@ final class TranscriptStore: ObservableObject {
         repeat {
             observed = persistenceRevision
             await persistenceTask?.value
-            await persistence.flush()
         } while observed != persistenceRevision
         return !loadBlocked && persistenceError == nil
     }
-
-    func flushPersistenceForTesting() async { _ = await flushPersistence() }
 
     @discardableResult
     func retrySave() async -> Bool {

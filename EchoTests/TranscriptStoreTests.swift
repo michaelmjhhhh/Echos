@@ -20,7 +20,7 @@ final class TranscriptStoreTests: XCTestCase {
         let store = TranscriptStore(directory: directory)
         store.add("hello world")
         store.add("second entry")
-        await store.flushPersistenceForTesting()
+        await store.flushPersistence()
 
         let reloaded = TranscriptStore(directory: directory)
         XCTAssertEqual(reloaded.entries.map(\.text), ["second entry", "hello world"])
@@ -33,7 +33,7 @@ final class TranscriptStoreTests: XCTestCase {
             store.add("entry \(index)")
         }
         XCTAssertEqual(store.entries.map(\.text), ["entry 5", "entry 4", "entry 3"])
-        await store.flushPersistenceForTesting()
+        await store.flushPersistence()
     }
 
     func testClearEmptiesMemoryAndDisk() async {
@@ -41,7 +41,7 @@ final class TranscriptStoreTests: XCTestCase {
         store.add("hello")
         store.clear()
         XCTAssertTrue(store.entries.isEmpty)
-        await store.flushPersistenceForTesting()
+        await store.flushPersistence()
         XCTAssertTrue(TranscriptStore(directory: directory).entries.isEmpty)
     }
 
@@ -52,7 +52,7 @@ final class TranscriptStoreTests: XCTestCase {
         store.add("hello")
 
         XCTAssertEqual(store.entries.map(\.text), ["hello"])
-        await store.flushPersistenceForTesting()
+        await store.flushPersistence()
         let submissions = await persistence.submissions
         XCTAssertEqual(submissions.last?.entries.map(\.text), ["hello"])
     }
@@ -64,7 +64,7 @@ final class TranscriptStoreTests: XCTestCase {
         store.add("two")
         store.clear()
 
-        await store.flushPersistenceForTesting()
+        await store.flushPersistence()
 
         let submissions = await persistence.submissions
         XCTAssertEqual(submissions.map(\.revision), [1, 2, 3])
@@ -83,7 +83,7 @@ final class TranscriptStoreTests: XCTestCase {
         XCTAssertFalse(finishedWhileBlocked)
 
         await persistence.release()
-        await store.flushPersistenceForTesting()
+        await store.flushPersistence()
         let finishedAfterRelease = await persistence.didFinish
         XCTAssertTrue(finishedAfterRelease)
     }
@@ -93,7 +93,7 @@ final class TranscriptStoreTests: XCTestCase {
         let store = TranscriptStore(directory: directory, persistence: persistence)
 
         store.add("hello")
-        await store.flushPersistenceForTesting()
+        await store.flushPersistence()
 
         XCTAssertEqual(store.entries.map(\.text), ["hello"])
         let submissionCount = await persistence.submissionCount
@@ -105,7 +105,7 @@ final class TranscriptStoreTests: XCTestCase {
         for index in 0..<100 { store.add("entry \(index)") }
         store.clear()
 
-        await store.flushPersistenceForTesting()
+        await store.flushPersistence()
 
         XCTAssertTrue(TranscriptStore(directory: directory).entries.isEmpty)
     }
@@ -116,7 +116,7 @@ final class TranscriptStoreTests: XCTestCase {
         store.add("four five")
         XCTAssertEqual(store.todayEntries.count, 2)
         XCTAssertEqual(store.todayWordCount, 5)
-        await store.flushPersistenceForTesting()
+        await store.flushPersistence()
     }
 }
 
@@ -126,7 +126,7 @@ private actor GatedHistoryPersistence: HistoryPersisting {
     private var startWaiters: [CheckedContinuation<Void, Never>] = []
     private var releaseWaiter: CheckedContinuation<Void, Never>?
 
-    func submit(entries: [TranscriptEntry], revision: Int) async {
+    func submit(entries: [TranscriptEntry], revision: Int, preservePrevious: Bool, clearBackup: Bool, purgeRecovery: Bool) async {
         started = true
         let waiters = startWaiters
         startWaiters.removeAll()
@@ -145,18 +145,19 @@ private actor GatedHistoryPersistence: HistoryPersisting {
         releaseWaiter = nil
     }
 
-    func flush() async {}
+    func lastError() async -> StorePersistenceError? { nil }
 }
 
 private actor FailingHistoryPersistence: HistoryPersisting {
     private(set) var submissionCount = 0
+    private var error: StorePersistenceError?
 
-    func submit(entries: [TranscriptEntry], revision: Int) async {
+    func submit(entries: [TranscriptEntry], revision: Int, preservePrevious: Bool, clearBackup: Bool, purgeRecovery: Bool) async {
         submissionCount += 1
-        // Simulate an encoder or disk writer that cannot persist the snapshot.
+        error = .writeFailed("Simulated history persistence failure.")
     }
 
-    func flush() async {}
+    func lastError() async -> StorePersistenceError? { error }
 }
 
 private actor SpyHistoryPersistence: HistoryPersisting {
@@ -167,9 +168,9 @@ private actor SpyHistoryPersistence: HistoryPersisting {
 
     private(set) var submissions: [Submission] = []
 
-    func submit(entries: [TranscriptEntry], revision: Int) async {
+    func submit(entries: [TranscriptEntry], revision: Int, preservePrevious: Bool, clearBackup: Bool, purgeRecovery: Bool) async {
         submissions.append(Submission(revision: revision, entries: entries))
     }
 
-    func flush() async {}
+    func lastError() async -> StorePersistenceError? { nil }
 }

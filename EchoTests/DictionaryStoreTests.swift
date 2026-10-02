@@ -170,8 +170,8 @@ final class DictionaryStoreTests: XCTestCase {
         store.add(word: "Kubernetes", misspelling: "cooper")
         store.add(word: "plain-word")
         store.add(word: "K8s cluster", misspelling: "cooper netties cluster")
-        XCTAssertEqual(store.replacementRules.map(\.misspelling), ["cooper netties cluster", "cooper"])
-        XCTAssertEqual(store.replacementRules.map(\.word), ["K8s cluster", "Kubernetes"])
+        XCTAssertEqual(store.compiledReplacementRules.map(\.misspelling), ["cooper netties cluster", "cooper"])
+        XCTAssertEqual(store.compiledReplacementRules.map(\.word), ["K8s cluster", "Kubernetes"])
     }
 
     func testCounts() {

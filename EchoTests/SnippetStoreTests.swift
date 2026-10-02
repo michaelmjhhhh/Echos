@@ -126,7 +126,7 @@ final class SnippetStoreTests: XCTestCase {
         let store = makeStore()
         store.add(trigger: "my email", expansion: "a@b.c")
         store.add(trigger: "my email signature", expansion: "Best, Michael")
-        XCTAssertEqual(store.rules.map(\.trigger), ["my email signature", "my email"])
+        XCTAssertEqual(store.compiledRules.map(\.trigger), ["my email signature", "my email"])
     }
 
     func testCompiledRulesRebuildAfterAddUpdateAndDelete() throws {
