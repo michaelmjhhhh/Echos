@@ -1,4 +1,3 @@
-import Combine
 import SQLite3
 import XCTest
 @testable import Echo
@@ -21,29 +20,6 @@ final class UsageStoreTests: XCTestCase {
 
     private func day(_ offset: Int, from reference: Date = Date()) -> Date {
         calendar.date(byAdding: .day, value: offset, to: reference)!
-    }
-
-    private func publishedSnapshot(of store: UsageStore) async -> UsageSnapshot {
-        let settled = expectation(description: "pending usage writes published")
-        let savingSubscription = store.$isSaving
-            .first(where: { !$0 })
-            .sink { _ in settled.fulfill() }
-        await fulfillment(of: [settled], timeout: 2)
-        savingSubscription.cancel()
-
-        let published = expectation(description: "usage snapshot refreshed")
-        var result: UsageSnapshot?
-        let subscription = store.$snapshot
-            .dropFirst()
-            .first()
-            .sink { snapshot in
-                result = snapshot
-                published.fulfill()
-            }
-        defer { subscription.cancel() }
-        store.refresh()
-        await fulfillment(of: [published], timeout: 2)
-        return result ?? store.snapshot
     }
 
     private func metrics(outcome: DictationOutcome = .success) -> DictationOperationalMetrics {
@@ -93,7 +69,7 @@ final class UsageStoreTests: XCTestCase {
         store.record(words: 20, duration: 8, latency: nil, appBundleID: "com.apple.Safari", appName: "Safari")
 
         let reloaded = UsageStore(directory: directory)
-        let totals = await publishedSnapshot(of: reloaded).totals
+        let totals = await publishedUsageSnapshot(from: reloaded).totals
         XCTAssertEqual(totals.words, 30)
         XCTAssertEqual(totals.dictations, 2)
         XCTAssertEqual(totals.activeDays, 1)
@@ -104,7 +80,7 @@ final class UsageStoreTests: XCTestCase {
         createLegacyDatabase()
         let store = UsageStore(directory: directory)
 
-        let migrated = await publishedSnapshot(of: store)
+        let migrated = await publishedUsageSnapshot(from: store)
         XCTAssertEqual(migrated.totals.dictations, 1)
         XCTAssertEqual(migrated.totals.words, 4)
         store.record(
@@ -115,7 +91,7 @@ final class UsageStoreTests: XCTestCase {
             appName: nil,
             metrics: metrics()
         )
-        let updated = await publishedSnapshot(of: store)
+        let updated = await publishedUsageSnapshot(from: store)
         XCTAssertEqual(updated.totals.dictations, 2)
         XCTAssertEqual(updated.totals.words, 7)
         XCTAssertEqual(store.latestOperationalMetricsForTesting(), metrics())
@@ -140,7 +116,7 @@ final class UsageStoreTests: XCTestCase {
             metrics: metrics(outcome: .transcriptionFailure)
         )
 
-        let snapshot = await publishedSnapshot(of: store)
+        let snapshot = await publishedUsageSnapshot(from: store)
         XCTAssertEqual(snapshot.totals.dictations, 1)
         XCTAssertEqual(snapshot.totals.words, 5)
         XCTAssertEqual(snapshot.wpm, 150)
@@ -177,13 +153,13 @@ final class UsageStoreTests: XCTestCase {
         store.record(words: 60, duration: 30, latency: nil, appBundleID: nil, appName: nil)
         store.record(words: 30, duration: 30, latency: nil, appBundleID: nil, appName: nil)
         // 90 words over 60 seconds of speech = 90 WPM
-        let snapshot = await publishedSnapshot(of: store)
+        let snapshot = await publishedUsageSnapshot(from: store)
         XCTAssertEqual(snapshot.wpm, 90)
     }
 
     func testAverageWPMEmptyIsZero() async {
         let store = UsageStore(directory: directory)
-        let snapshot = await publishedSnapshot(of: store)
+        let snapshot = await publishedUsageSnapshot(from: store)
         XCTAssertEqual(snapshot.wpm, 0)
     }
 
@@ -193,7 +169,7 @@ final class UsageStoreTests: XCTestCase {
         store.record(words: 50, duration: 20, latency: nil, appBundleID: "b", appName: "Beta")
         store.record(words: 10, duration: 4, latency: nil, appBundleID: "a", appName: "Alpha")
 
-        let apps = await publishedSnapshot(of: store).apps
+        let apps = await publishedUsageSnapshot(from: store).apps
         XCTAssertEqual(apps.map(\.name), ["Beta", "Alpha"])
         XCTAssertEqual(apps.map(\.words), [50, 15])
     }
@@ -205,7 +181,7 @@ final class UsageStoreTests: XCTestCase {
         store.record(words: 15, duration: 5, latency: nil, appBundleID: nil, appName: nil, date: today)
         store.record(words: 7, duration: 5, latency: nil, appBundleID: nil, appName: nil, date: day(-1))
 
-        let daily = await publishedSnapshot(of: store).daily
+        let daily = await publishedUsageSnapshot(from: store).daily
         XCTAssertEqual(daily[calendar.startOfDay(for: today)], 25)
         XCTAssertEqual(daily[calendar.startOfDay(for: day(-1))], 7)
     }

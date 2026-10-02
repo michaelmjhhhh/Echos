@@ -6,7 +6,7 @@ All user-facing and engineering changes are recorded here. Model weights are unc
 
 ### Changed
 
-- Use the current transcription, insertion, history-persistence, and capture-generation interfaces throughout the app and existing test adapters. Usage checks now read the published snapshots used by the UI.
+- Use the current transcription, insertion, history-persistence, and capture-generation interfaces throughout the app and existing test adapters. Usage checks share one bounded wait for the published snapshots used by the UI.
 
 ### Removed
 

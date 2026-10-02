@@ -321,7 +321,7 @@ final class DictationControllerTests: XCTestCase {
         controller.hotkeyReleased()
         await controller.transcriptionTask?.value
 
-        let totals = await publishedSnapshot(from: usage).totals
+        let totals = await publishedUsageSnapshot(from: usage).totals
         XCTAssertEqual(totals.dictations, 1)
         XCTAssertEqual(totals.words, 3)
         let metrics = usage.latestOperationalMetricsForTesting()
@@ -387,7 +387,7 @@ final class DictationControllerTests: XCTestCase {
         await controller.transcriptionTask?.value
 
         XCTAssertEqual(usage.latestOperationalMetricsForTesting()?.outcome, .emptyTranscript)
-        let snapshot = await publishedSnapshot(from: usage)
+        let snapshot = await publishedUsageSnapshot(from: usage)
         XCTAssertEqual(snapshot.totals.dictations, 0)
     }
 
@@ -402,28 +402,8 @@ final class DictationControllerTests: XCTestCase {
         await controller.transcriptionTask?.value
 
         XCTAssertEqual(usage.latestOperationalMetricsForTesting()?.outcome, .transcriptionFailure)
-        let snapshot = await publishedSnapshot(from: usage)
+        let snapshot = await publishedUsageSnapshot(from: usage)
         XCTAssertEqual(snapshot.totals.dictations, 0)
-    }
-
-    private func publishedSnapshot(from store: UsageStore) async -> UsageSnapshot {
-        let settled = expectation(description: "usage writes published")
-        let writes = store.$isSaving.first(where: { !$0 }).sink { _ in settled.fulfill() }
-        defer { writes.cancel() }
-        await fulfillment(of: [settled], timeout: 2)
-
-        let published = expectation(description: "refreshed usage snapshot published")
-        var result = UsageSnapshot()
-        let subscription = store.$snapshot.dropFirst()
-            .first()
-            .sink { snapshot in
-                result = snapshot
-                published.fulfill()
-            }
-        defer { subscription.cancel() }
-        store.refresh()
-        await fulfillment(of: [published], timeout: 2)
-        return result
     }
 
     private func makeControllerWithUsageStore() -> (DictationController, UsageStore) {
