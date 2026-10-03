@@ -3,21 +3,9 @@ import WhisperKit
 import Tokenizers
 
 protocol Transcribing {
-    func prepare(progress: @escaping (Double) -> Void) async throws
     func prepare(forceRepair: Bool, progress: @escaping (Double) -> Void) async throws
     func loadModel() async throws
-    func transcribe(_ samples: [Float], vocabulary: [String]) async throws -> String
     func transcribe(_ samples: [Float], request: TranscriptionRequest) async throws -> TranscriptionOutput
-}
-
-extension Transcribing {
-    func prepare(forceRepair: Bool, progress: @escaping (Double) -> Void) async throws {
-        try await prepare(progress: progress)
-    }
-
-    func transcribe(_ samples: [Float], request: TranscriptionRequest) async throws -> TranscriptionOutput {
-        TranscriptionOutput(text: try await transcribe(samples, vocabulary: request.vocabulary), language: request.language)
-    }
 }
 
 /// One service owns one engine. The gate remains occupied until a cancelled
@@ -39,10 +27,6 @@ final class TranscriptionService: Transcribing {
     init(modelVariant: String, downloadBase: URL? = nil) {
         self.modelVariant = modelVariant
         self.downloadBase = downloadBase
-    }
-
-    func prepare(progress: @escaping (Double) -> Void) async throws {
-        try await prepare(forceRepair: false, progress: progress)
     }
 
     func prepare(forceRepair: Bool, progress: @escaping (Double) -> Void) async throws {
@@ -113,10 +97,6 @@ final class TranscriptionService: Transcribing {
         }
     }
 
-    func transcribe(_ samples: [Float], vocabulary: [String]) async throws -> String {
-        try await transcribe(samples, request: TranscriptionRequest(vocabulary: vocabulary, language: "en")).text
-    }
-
     func transcribe(_ samples: [Float], request: TranscriptionRequest) async throws -> TranscriptionOutput {
         try await gate.acquire()
         do {
@@ -183,9 +163,7 @@ final class TranscriptionService: Transcribing {
         let results = try await whisperKit.transcribe(audioArray: input, decodeOptions: options)
         try Task.checkCancellation()
         diagnostics.inferenceDuration = ProcessInfo.processInfo.systemUptime - decodeStart
-        let segments = results.flatMap(\.segments).map {
-            TranscriptionSegmentInfo(text: $0.text, start: Double($0.start), end: Double($0.end), averageLogProbability: $0.avgLogprob, compressionRatio: $0.compressionRatio)
-        }
+        let segments = results.flatMap(\.segments)
         for result in results {
             diagnostics.encoderRuns += Int(result.timings.totalEncodingRuns)
             diagnostics.decoderTokenCount += Int(result.timings.totalDecodingLoops)
@@ -199,15 +177,15 @@ final class TranscriptionService: Transcribing {
             diagnostics.encoderDuration += result.timings.encoding
         }
         if !segments.isEmpty {
-            diagnostics.averageLogProbability = segments.map(\.averageLogProbability).reduce(0, +) / Float(segments.count)
+            diagnostics.averageLogProbability = segments.map(\.avgLogprob).reduce(0, +) / Float(segments.count)
             diagnostics.maximumCompressionRatio = segments.map(\.compressionRatio).max()
         }
         // Flag supported warning signals for recoverable review. Never delete
         // plausible quiet speech based on these uncalibrated numbers.
-        let needsReview = segments.contains { $0.averageLogProbability < -1 || $0.compressionRatio > 2.4 }
+        let needsReview = segments.contains { $0.avgLogprob < -1 || $0.compressionRatio > 2.4 }
         return TranscriptionOutput(
             text: results.map(\.text).joined(separator: " "), language: results.first?.language ?? language,
-            segments: segments, diagnostics: diagnostics, needsReview: needsReview
+            diagnostics: diagnostics, needsReview: needsReview
         )
     }
 }

@@ -24,7 +24,7 @@ final class TranscriptionServiceTests: XCTestCase {
         var reported: [Double] = []
 
         do {
-            try await service.prepare { reported.append($0) }
+            try await service.prepare(forceRepair: false) { reported.append($0) }
             XCTFail("An unknown model variant must not be accepted as installed")
         } catch ModelInstallationError.unknownVariant {
             // This local catalog rejection occurs before model or tokenizer download.

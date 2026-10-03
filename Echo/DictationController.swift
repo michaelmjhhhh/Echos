@@ -390,7 +390,6 @@ final class DictationController: ObservableObject {
         isFinishingRecording = false
         activeSession = nil
         transcriptionTask = nil
-        recorder.onCaptureReady = nil
         recorder.onCaptureReadyForGeneration = nil
         recorder.onInterruption = nil
         hotkeyMonitor.hotkey = settings.hotkey
@@ -439,14 +438,6 @@ final class DictationController: ObservableObject {
             snippets: settings.expandSnippets ? (snippets?.compiledRules ?? []) : [],
             keepOnClipboard: settings.copyTranscriptToClipboard, saveHistory: settings.saveHistory)
         activeSession = session
-        recorder.onCaptureReady = { [weak self] in
-            Task { @MainActor in
-                guard let self, self.activeSession?.id == id,
-                      self.recorder.captureGeneration == nil,
-                      case .recording = self.state else { return }
-                self.micReady = true
-            }
-        }
         recorder.onCaptureReadyForGeneration = { [weak self] generation in
             Task { @MainActor in
                 guard let self, self.activeSession?.id == id,

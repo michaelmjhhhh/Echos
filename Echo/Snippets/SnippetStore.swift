@@ -56,7 +56,7 @@ enum SnippetError: LocalizedError, Equatable {
 }
 
 /// The user's saved snippets, persisted as JSON in Application Support next to
-/// the dictionary. Feeds `SnippetProcessor` via `rules`. Everything stays on
+/// the dictionary. Feeds `SnippetProcessor` via `compiledRules`. Everything stays on
 /// this Mac.
 @MainActor
 final class SnippetStore: ObservableObject {
@@ -150,14 +150,6 @@ final class SnippetStore: ObservableObject {
     }
 
     // MARK: - Derived views
-
-    /// Matching rules, longest trigger first so overlapping triggers can't
-    /// clobber each other ("my email signature" before "my email").
-    var rules: [(trigger: String, expansion: String)] {
-        entries
-            .map { (trigger: $0.trigger, expansion: $0.expansion) }
-            .sorted { $0.trigger.count == $1.trigger.count ? TextRuleMatcher.key($0.trigger) < TextRuleMatcher.key($1.trigger) : $0.trigger.count > $1.trigger.count }
-    }
 
     private func rebuildCompiledRules() {
         compiledRules = entries.sorted {

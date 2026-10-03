@@ -63,25 +63,26 @@ final class UsageStoreTests: XCTestCase {
             """, nil, nil, nil), SQLITE_OK)
     }
 
-    func testRecordAndTotalsPersistAcrossReload() {
+    func testRecordAndTotalsPersistAcrossReload() async {
         let store = UsageStore(directory: directory)
         store.record(words: 10, duration: 5, latency: 1.0, appBundleID: "com.apple.TextEdit", appName: "TextEdit")
         store.record(words: 20, duration: 8, latency: nil, appBundleID: "com.apple.Safari", appName: "Safari")
 
         let reloaded = UsageStore(directory: directory)
-        let totals = reloaded.totals()
+        let totals = await publishedUsageSnapshot(from: reloaded).totals
         XCTAssertEqual(totals.words, 30)
         XCTAssertEqual(totals.dictations, 2)
         XCTAssertEqual(totals.activeDays, 1)
         XCTAssertEqual(totals.wordsThisMonth, 30)
     }
 
-    func testLegacySchemaMigratesAndPreservesTotals() {
+    func testLegacySchemaMigratesAndPreservesTotals() async {
         createLegacyDatabase()
         let store = UsageStore(directory: directory)
 
-        XCTAssertEqual(store.totals().dictations, 1)
-        XCTAssertEqual(store.totals().words, 4)
+        let migrated = await publishedUsageSnapshot(from: store)
+        XCTAssertEqual(migrated.totals.dictations, 1)
+        XCTAssertEqual(migrated.totals.words, 4)
         store.record(
             words: 3,
             duration: 2,
@@ -90,12 +91,13 @@ final class UsageStoreTests: XCTestCase {
             appName: nil,
             metrics: metrics()
         )
-        XCTAssertEqual(store.totals().dictations, 2)
-        XCTAssertEqual(store.totals().words, 7)
+        let updated = await publishedUsageSnapshot(from: store)
+        XCTAssertEqual(updated.totals.dictations, 2)
+        XCTAssertEqual(updated.totals.words, 7)
         XCTAssertEqual(store.latestOperationalMetricsForTesting(), metrics())
     }
 
-    func testFailedOperationalRowsDoNotAffectInsights() {
+    func testFailedOperationalRowsDoNotAffectInsights() async {
         let store = UsageStore(directory: directory)
         store.record(
             words: 5,
@@ -114,12 +116,13 @@ final class UsageStoreTests: XCTestCase {
             metrics: metrics(outcome: .transcriptionFailure)
         )
 
-        XCTAssertEqual(store.totals().dictations, 1)
-        XCTAssertEqual(store.totals().words, 5)
-        XCTAssertEqual(store.averageWPM(), 150)
-        XCTAssertEqual(store.perAppWords().map(\.bundleID), ["success.app"])
+        let snapshot = await publishedUsageSnapshot(from: store)
+        XCTAssertEqual(snapshot.totals.dictations, 1)
+        XCTAssertEqual(snapshot.totals.words, 5)
+        XCTAssertEqual(snapshot.wpm, 150)
+        XCTAssertEqual(snapshot.apps.map(\.bundleID), ["success.app"])
         let today = Calendar.current.startOfDay(for: Date())
-        XCTAssertEqual(store.dailyWords(since: Date().addingTimeInterval(-60))[today], 5)
+        XCTAssertEqual(snapshot.daily[today], 5)
     }
 
     func testOperationalSchemaContainsNoContentOrDeviceColumns() {
@@ -145,37 +148,40 @@ final class UsageStoreTests: XCTestCase {
         XCTAssertEqual(Set(names), expected)
     }
 
-    func testAverageWPM() {
+    func testAverageWPM() async {
         let store = UsageStore(directory: directory)
         store.record(words: 60, duration: 30, latency: nil, appBundleID: nil, appName: nil)
         store.record(words: 30, duration: 30, latency: nil, appBundleID: nil, appName: nil)
         // 90 words over 60 seconds of speech = 90 WPM
-        XCTAssertEqual(store.averageWPM(), 90)
+        let snapshot = await publishedUsageSnapshot(from: store)
+        XCTAssertEqual(snapshot.wpm, 90)
     }
 
-    func testAverageWPMEmptyIsZero() {
-        XCTAssertEqual(UsageStore(directory: directory).averageWPM(), 0)
+    func testAverageWPMEmptyIsZero() async {
+        let store = UsageStore(directory: directory)
+        let snapshot = await publishedUsageSnapshot(from: store)
+        XCTAssertEqual(snapshot.wpm, 0)
     }
 
-    func testPerAppWordsOrdersByVolume() {
+    func testPerAppWordsOrdersByVolume() async {
         let store = UsageStore(directory: directory)
         store.record(words: 5, duration: 2, latency: nil, appBundleID: "a", appName: "Alpha")
         store.record(words: 50, duration: 20, latency: nil, appBundleID: "b", appName: "Beta")
         store.record(words: 10, duration: 4, latency: nil, appBundleID: "a", appName: "Alpha")
 
-        let apps = store.perAppWords()
+        let apps = await publishedUsageSnapshot(from: store).apps
         XCTAssertEqual(apps.map(\.name), ["Beta", "Alpha"])
         XCTAssertEqual(apps.map(\.words), [50, 15])
     }
 
-    func testDailyWordsGroupsByLocalDay() {
+    func testDailyWordsGroupsByLocalDay() async {
         let store = UsageStore(directory: directory)
         let today = Date()
         store.record(words: 10, duration: 5, latency: nil, appBundleID: nil, appName: nil, date: today)
         store.record(words: 15, duration: 5, latency: nil, appBundleID: nil, appName: nil, date: today)
         store.record(words: 7, duration: 5, latency: nil, appBundleID: nil, appName: nil, date: day(-1))
 
-        let daily = store.dailyWords(since: day(-3))
+        let daily = await publishedUsageSnapshot(from: store).daily
         XCTAssertEqual(daily[calendar.startOfDay(for: today)], 25)
         XCTAssertEqual(daily[calendar.startOfDay(for: day(-1))], 7)
     }

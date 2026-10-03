@@ -25,25 +25,11 @@ struct InsertionTarget {
 protocol TextInserting {
     /// Whether the frontmost app currently has somewhere to paste into.
     var hasInsertionTarget: Bool { get }
-    @discardableResult
-    func insert(_ text: String, keepOnClipboard: Bool) -> InsertionResult
-    func copyToClipboard(_ text: String)
     func copyWithResult(_ text: String) -> Bool
     func flushPendingRestoration() async
     func captureTarget() -> InsertionTarget?
     func targetMatches(_ target: InsertionTarget?) -> Bool
     func insert(_ text: String, keepOnClipboard: Bool, target: InsertionTarget?) -> InsertionResult
-}
-
-extension TextInserting {
-    func flushPendingRestoration() async {}
-    func copyWithResult(_ text: String) -> Bool { copyToClipboard(text); return true }
-    func captureTarget() -> InsertionTarget? { nil }
-    func targetMatches(_ target: InsertionTarget?) -> Bool { true }
-    func insert(_ text: String, keepOnClipboard: Bool, target: InsertionTarget?) -> InsertionResult {
-        guard targetMatches(target) else { return .copyRequired }
-        return insert(text, keepOnClipboard: keepOnClipboard)
-    }
 }
 
 /// Inserts text at the cursor of the frontmost app via the clipboard:
@@ -164,10 +150,6 @@ final class TextInserter: TextInserting {
             valueSettable: false, selectedTextRangeSettable: rangeSettable.boolValue)
     }
 
-    func copyToClipboard(_ text: String) {
-        _ = copyWithResult(text)
-    }
-
     func copyWithResult(_ text: String) -> Bool {
         let pasteboard = NSPasteboard.general
         let saved = ownedChangeCount == pasteboard.changeCount
@@ -182,16 +164,7 @@ final class TextInserter: TextInserting {
     }
 
     func insert(_ text: String, keepOnClipboard: Bool, target: InsertionTarget?) -> InsertionResult {
-        guard targetMatches(target) else { return .copyRequired }
-        return performInsertion(text, keepOnClipboard: keepOnClipboard, target: target)
-    }
-
-    @discardableResult
-    func insert(_ text: String, keepOnClipboard: Bool) -> InsertionResult {
-        performInsertion(text, keepOnClipboard: keepOnClipboard, target: nil)
-    }
-
-    private func performInsertion(_ text: String, keepOnClipboard: Bool, target: InsertionTarget?) -> InsertionResult {
+        guard let target, targetMatches(target) else { return .copyRequired }
         // Check before touching the clipboard, including the secure-input race.
         guard Permissions.accessibilityGranted, !IsSecureEventInputEnabled() else {
             if keepOnClipboard {
@@ -209,7 +182,7 @@ final class TextInserter: TextInserting {
         }
         // Reading promised clipboard data can invoke another application. Validate
         // the destination again after that work and before changing shared state.
-        if let target, !targetMatches(target) { return .copyRequired }
+        guard targetMatches(target) else { return .copyRequired }
         guard Permissions.accessibilityGranted, !IsSecureEventInputEnabled(), hasInsertionTarget else {
             if keepOnClipboard { return copyWithResult(text) ? .copiedToClipboard : .failed }
             return .copyRequired
@@ -222,18 +195,13 @@ final class TextInserter: TextInserting {
         }
         let changeCount = pasteboard.changeCount
         let identifier = transactionID
-        if let target {
-            guard NSWorkspace.shared.frontmostApplication?.processIdentifier == target.processID,
-                  !IsSecureEventInputEnabled() else {
-                if pasteboard.changeCount == changeCount { restore(saved, to: pasteboard) }
-                return .copyRequired
-            }
-            events.0.postToPid(target.processID)
-            events.1.postToPid(target.processID)
-        } else {
-            events.0.post(tap: .cghidEventTap)
-            events.1.post(tap: .cghidEventTap)
+        guard NSWorkspace.shared.frontmostApplication?.processIdentifier == target.processID,
+              !IsSecureEventInputEnabled() else {
+            if pasteboard.changeCount == changeCount { restore(saved, to: pasteboard) }
+            return .copyRequired
         }
+        events.0.postToPid(target.processID)
+        events.1.postToPid(target.processID)
         if !keepOnClipboard {
             ownedChangeCount = changeCount
             originalContents = saved

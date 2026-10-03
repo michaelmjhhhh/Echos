@@ -2,17 +2,8 @@ import Foundation
 import OSLog
 
 protocol HistoryPersisting: Sendable {
-    func submit(entries: [TranscriptEntry], revision: Int) async
     func submit(entries: [TranscriptEntry], revision: Int, preservePrevious: Bool, clearBackup: Bool, purgeRecovery: Bool) async
-    func flush() async
     func lastError() async -> StorePersistenceError?
-}
-
-extension HistoryPersisting {
-    func submit(entries: [TranscriptEntry], revision: Int, preservePrevious: Bool, clearBackup: Bool, purgeRecovery: Bool) async {
-        await submit(entries: entries, revision: revision)
-    }
-    func lastError() async -> StorePersistenceError? { nil }
 }
 
 /// Serializes immutable snapshots away from the insertion path. Callers await the
@@ -25,10 +16,6 @@ actor HistoryPersistence: HistoryPersisting {
     private var error: StorePersistenceError?
 
     init(fileURL: URL) { file = StoreFile(url: fileURL) }
-
-    func submit(entries: [TranscriptEntry], revision: Int) async {
-        await submit(entries: entries, revision: revision, preservePrevious: true, clearBackup: entries.isEmpty, purgeRecovery: entries.isEmpty)
-    }
 
     func submit(entries: [TranscriptEntry], revision: Int, preservePrevious: Bool, clearBackup: Bool, purgeRecovery: Bool) async {
         guard revision > newestPersistedRevision else { return }
@@ -44,6 +31,5 @@ actor HistoryPersistence: HistoryPersisting {
         }
     }
 
-    func flush() async {}
     func lastError() async -> StorePersistenceError? { error }
 }

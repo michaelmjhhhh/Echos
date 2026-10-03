@@ -60,7 +60,7 @@ struct EchoEvaluate {
         if !options.validateOnly {
             let preparationStart = ProcessInfo.processInfo.systemUptime
             if options.download {
-                try await service.prepare(progress: { _ in })
+                try await service.prepare(forceRepair: false, progress: { _ in })
             } else {
                 try await service.prepareInstalled()
             }

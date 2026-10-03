@@ -194,21 +194,6 @@ final class UsageStore: ObservableObject {
         } catch { persistenceError = error.localizedDescription; return false }
     }
 
-    // Compatibility APIs for existing callers. Views must use snapshot.
-    func totals(now: Date = Date(), calendar: Calendar = .current) -> UsageTotals {
-        UsageDatabase.queue.sync { UsageDatabase.snapshot((try? database.records()) ?? [], now: now, calendar: calendar).totals }
-    }
-    func averageWPM(days: Int = 30, now: Date = Date()) -> Int {
-        UsageDatabase.queue.sync { UsageDatabase.wordsPerMinute((try? database.records()) ?? [], days: days, now: now) }
-    }
-    func perAppWords(limit: Int = 6) -> [AppUsage] {
-        UsageDatabase.queue.sync { Array(UsageDatabase.snapshot((try? database.records()) ?? []).apps.prefix(max(0, limit))) }
-    }
-    func dailyWords(since: Date, calendar: Calendar = .current) -> [Date: Int] {
-        UsageDatabase.queue.sync {
-            UsageDatabase.snapshot(((try? database.records()) ?? []).filter { $0.date >= since }, calendar: calendar).daily
-        }
-    }
     #if DEBUG
     func latestOperationalMetricsForTesting() -> DictationOperationalMetrics? {
         UsageDatabase.queue.sync { (try? database.records())?.last?.metrics }

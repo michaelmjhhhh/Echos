@@ -321,7 +321,7 @@ final class DictationControllerTests: XCTestCase {
         controller.hotkeyReleased()
         await controller.transcriptionTask?.value
 
-        let totals = usage.totals()
+        let totals = await publishedUsageSnapshot(from: usage).totals
         XCTAssertEqual(totals.dictations, 1)
         XCTAssertEqual(totals.words, 3)
         let metrics = usage.latestOperationalMetricsForTesting()
@@ -357,7 +357,7 @@ final class DictationControllerTests: XCTestCase {
 
         XCTAssertTrue(historyWasEmptyAtInsertion)
         XCTAssertEqual(transcripts.entries.map(\.text), ["hello"])
-        await transcripts.flushPersistenceForTesting()
+        await transcripts.flushPersistence()
     }
 
     func testSuccessfulLatencyIncludesInsertionTime() async {
@@ -387,7 +387,8 @@ final class DictationControllerTests: XCTestCase {
         await controller.transcriptionTask?.value
 
         XCTAssertEqual(usage.latestOperationalMetricsForTesting()?.outcome, .emptyTranscript)
-        XCTAssertEqual(usage.totals().dictations, 0)
+        let snapshot = await publishedUsageSnapshot(from: usage)
+        XCTAssertEqual(snapshot.totals.dictations, 0)
     }
 
     func testTranscriptionFailureRecordsOperationalOutcome() async {
@@ -401,7 +402,8 @@ final class DictationControllerTests: XCTestCase {
         await controller.transcriptionTask?.value
 
         XCTAssertEqual(usage.latestOperationalMetricsForTesting()?.outcome, .transcriptionFailure)
-        XCTAssertEqual(usage.totals().dictations, 0)
+        let snapshot = await publishedUsageSnapshot(from: usage)
+        XCTAssertEqual(snapshot.totals.dictations, 0)
     }
 
     private func makeControllerWithUsageStore() -> (DictationController, UsageStore) {
@@ -633,15 +635,22 @@ private final class MockRecorder: AudioRecording {
     private(set) var stopCallCount = 0
     private var stopContinuations: [CheckedContinuation<CapturedAudio, Never>] = []
     var onLevel: ((Float) -> Void)?
-    var onCaptureReady: (() -> Void)?
+    var onCaptureReadyForGeneration: ((CaptureGeneration) -> Void)?
+    var onInterruption: ((CaptureGeneration, String) -> Void)?
+    private(set) var captureGeneration: CaptureGeneration?
+    private var nextGeneration: UInt64 = 0
 
     func start(deviceUID: String?) throws {
         isRecording = true
-        if signalsCaptureReady { onCaptureReady?() }
+        nextGeneration += 1
+        let generation = CaptureGeneration(rawValue: nextGeneration)
+        captureGeneration = generation
+        if signalsCaptureReady { onCaptureReadyForGeneration?(generation) }
     }
 
     func stop() async -> CapturedAudio {
         isRecording = false
+        defer { captureGeneration = nil }
         stopCallCount += 1
         onStopStarted?()
         guard suspendsStop else { return makeCapturedAudio() }
@@ -657,7 +666,7 @@ private final class MockRecorder: AudioRecording {
 
     private func makeCapturedAudio() -> CapturedAudio {
         CapturedAudio(
-            generation: CaptureGeneration(rawValue: UInt64(max(1, stopCallCount))),
+            generation: captureGeneration ?? CaptureGeneration(rawValue: nextGeneration),
             samples: samplesToReturn,
             convertedBufferCount: samplesToReturn.isEmpty ? 0 : 1,
             droppedBufferCount: 0,
@@ -684,7 +693,7 @@ private final class MockTranscriber: Transcribing {
     var loadError: Error?
     var progressToEmit: [Double] = []
 
-    func prepare(progress: @escaping (Double) -> Void) async throws {
+    func prepare(forceRepair: Bool, progress: @escaping (Double) -> Void) async throws {
         if let prepareError { throw prepareError }
         for value in progressToEmit { progress(value) }
     }
@@ -693,10 +702,10 @@ private final class MockTranscriber: Transcribing {
         if let loadError { throw loadError }
     }
 
-    func transcribe(_ samples: [Float], vocabulary: [String]) async throws -> String {
+    func transcribe(_ samples: [Float], request: TranscriptionRequest) async throws -> TranscriptionOutput {
         receivedSamples = samples
-        receivedVocabulary = vocabulary
-        return try result.get()
+        receivedVocabulary = request.vocabulary
+        return TranscriptionOutput(text: try result.get(), language: request.language)
     }
 }
 
@@ -709,8 +718,7 @@ private final class MockInserter: TextInserting {
     var insertDelay: TimeInterval = 0
     var onInsert: (() -> Void)?
 
-    @discardableResult
-    func insert(_ text: String, keepOnClipboard: Bool) -> InsertionResult {
+    func insert(_ text: String, keepOnClipboard: Bool, target: InsertionTarget?) -> InsertionResult {
         if insertDelay > 0 { Thread.sleep(forTimeInterval: insertDelay) }
         onInsert?()
         insertedText = text
@@ -718,9 +726,14 @@ private final class MockInserter: TextInserting {
         return resultToReturn
     }
 
-    func copyToClipboard(_ text: String) {
+    func copyWithResult(_ text: String) -> Bool {
         copiedText = text
+        return true
     }
+
+    func captureTarget() -> InsertionTarget? { nil }
+    func targetMatches(_ target: InsertionTarget?) -> Bool { true }
+    func flushPendingRestoration() async {}
 }
 
 @MainActor

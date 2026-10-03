@@ -136,26 +136,14 @@ enum Motion {
     static let overlayFadeOut: TimeInterval = 0.12
 }
 
-/// The standard surface: flat fill, hairline border, 10pt radius. No gradients
-/// or shadows — this system is flat on purpose.
-struct EchoCardModifier: ViewModifier {
-    var padding: CGFloat = Spacing.m
-
-    private var shape: RoundedRectangle {
-        RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
-    }
-
-    func body(content: Content) -> some View {
-        content
+extension View {
+    /// The standard surface: flat fill, hairline border, 10pt radius.
+    func echoCard(padding: CGFloat = Spacing.m) -> some View {
+        let shape = RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
+        return self
             .padding(padding)
             .background(shape.fill(Color.echoCard))
             .overlay(shape.strokeBorder(Color.echoHairline))
-    }
-}
-
-extension View {
-    func echoCard(padding: CGFloat = Spacing.m) -> some View {
-        modifier(EchoCardModifier(padding: padding))
     }
 
     /// The standard content column: capped width, centered, uniform padding.

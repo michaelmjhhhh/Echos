@@ -4,7 +4,6 @@ import CoreAudio
 protocol AudioRecording: AnyObject {
     var onLevel: ((Float) -> Void)? { get set }
     /// Transport readiness: valid samples arrived, including silent samples.
-    var onCaptureReady: (() -> Void)? { get set }
     var onCaptureReadyForGeneration: ((CaptureGeneration) -> Void)? { get set }
     var onInterruption: ((CaptureGeneration, String) -> Void)? { get set }
     var captureGeneration: CaptureGeneration? { get }
@@ -14,9 +13,6 @@ protocol AudioRecording: AnyObject {
 }
 
 extension AudioRecording {
-    var onCaptureReadyForGeneration: ((CaptureGeneration) -> Void)? { get { nil } set {} }
-    var onInterruption: ((CaptureGeneration, String) -> Void)? { get { nil } set {} }
-    var captureGeneration: CaptureGeneration? { nil }
     var needsBluetoothWake: Bool { false }
 }
 
@@ -30,10 +26,6 @@ final class AudioRecorder: AudioRecording, @unchecked Sendable {
     var onLevel: ((Float) -> Void)? {
         get { callbackSnapshot().level }
         set { updateCallbacks { $0.level = newValue } }
-    }
-    var onCaptureReady: (() -> Void)? {
-        get { callbackSnapshot().ready }
-        set { updateCallbacks { $0.ready = newValue } }
     }
     var onCaptureReadyForGeneration: ((CaptureGeneration) -> Void)? {
         get { callbackSnapshot().readyForGeneration }
@@ -50,7 +42,6 @@ final class AudioRecorder: AudioRecording, @unchecked Sendable {
     /// reads them on its queue. Copy under the lock, then invoke after unlocking.
     private struct Callbacks {
         var level: ((Float) -> Void)?
-        var ready: (() -> Void)?
         var readyForGeneration: ((CaptureGeneration) -> Void)?
         var interruption: ((CaptureGeneration, String) -> Void)?
     }
@@ -312,7 +303,6 @@ final class AudioRecorder: AudioRecording, @unchecked Sendable {
         let callbacks = callbackSnapshot()
         if result.signalCaptureReady {
             callbacks.readyForGeneration?(token.generation)
-            callbacks.ready?()
         }
         if result.accepted { callbacks.level?(min(1, rms * 6)) }
     }
