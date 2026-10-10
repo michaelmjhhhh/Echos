@@ -24,6 +24,8 @@ For non-trivial changes, ask the user whether we should open an issue or not.
 
 Your issue/PR description should be concise and simple. keep it short, concrete, and worth reading. 
 
+Do not include yourself as "Co Authored By".
+
 ## Changelog
 
 - Every user-facing or engineering update must update `CHANGELOG.md` in the same PR, including fixes, build changes, dependency changes, and documentation changes.

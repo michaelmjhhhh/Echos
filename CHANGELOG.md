@@ -4,6 +4,12 @@ All user-facing and engineering changes are recorded here. Model weights are unc
 
 ## [Unreleased]
 
+### Changed
+
+- Ignore `.pi-subagents/` and stop tracking its generated subagent artifacts.
+- Add `skills-lock.json`, which pins the `code-review` and `codebase-design` agent skills by source and hash.
+- `AGENTS.md` now forbids adding the agent as a commit co-author.
+
 ## [0.5.0] - 2026-10-10
 
 ### Added
