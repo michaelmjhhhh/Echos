@@ -4,6 +4,8 @@ All user-facing and engineering changes are recorded here. Model weights are unc
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-10
+
 ### Added
 
 - Add "Use recent dictation as context" (on by default). With Tiny (English), the previous transcript in the same app from the last five minutes is passed to the model, so names just used are recognized again. It stays in memory only. Other models ignore it: Distil Large v3 showed no gain in replay and returned empty text for most clips when context was used without dictionary words.
@@ -72,7 +74,8 @@ All user-facing and engineering changes are recorded here. Model weights are unc
 
 - Publish the first GitHub release with a DMG for Apple Silicon Macs running macOS 14 or later.
 
-[Unreleased]: https://github.com/michaelmjhhhh/Echos/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/michaelmjhhhh/Echos/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/michaelmjhhhh/Echos/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/michaelmjhhhh/Echos/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/michaelmjhhhh/Echos/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/michaelmjhhhh/Echos/releases/tag/v0.2.0
