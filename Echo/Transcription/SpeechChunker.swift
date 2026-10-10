@@ -20,7 +20,8 @@ enum SpeechChunker {
 
     /// Chunks are cut near 28 s, the length measured in replay. When that
     /// would leave a final chunk under 10 s, the last two chunks are split
-    /// evenly instead, so a 29-second recording becomes two ~14-second chunks.
+    /// about evenly instead (each 10 s or longer) rather than 28 s plus a
+    /// 1-second tail for a 29-second recording.
     static func chunks(_ samples: [Float]) -> [Range<Int>] {
         guard samples.count > maximumChunkSamples else { return [samples.indices] }
         var ranges: [Range<Int>] = []
@@ -43,7 +44,7 @@ enum SpeechChunker {
     /// later span so chunks stay long.
     private static func quietestPoint(in samples: [Float], range: Range<Int>) -> Int {
         let energies = stride(from: range.lowerBound, to: range.upperBound - frameSamples + 1, by: frameSamples).map { start in
-            samples[start..<(start + frameSamples)].reduce(Float(0)) { $0 + $1 * $1 }
+            samples[start..<(start + frameSamples)].reduce(0.0) { $0 + Double($1 * $1) }
         }
         guard energies.count > pauseFrames else { return range.upperBound }
         var sum = energies[0..<pauseFrames].reduce(0, +)
