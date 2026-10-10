@@ -24,6 +24,10 @@ final class TranscriptionService: Transcribing {
     }
     private var promptCache: (key: PromptKey, tokens: [Int])?
     private var nonSpeechTokens: [Int] = []
+    /// Recent text goes last in the prompt, where Whisper reads it as the
+    /// preceding speech. A short suffix is enough to carry names and casing,
+    /// and it leaves most of the 200-token prompt to the dictionary.
+    static let contextTokenLimit = 48
 
     init(modelVariant: String, downloadBase: URL? = nil) {
         self.modelVariant = modelVariant
@@ -145,22 +149,13 @@ final class TranscriptionService: Transcribing {
             concurrentWorkerCount: 1
         )
         let promptStart = ProcessInfo.processInfo.systemUptime
-        let key = PromptKey(vocabulary: request.vocabulary, language: language, budget: min(200, max(0, request.promptTokenBudget)))
-        let tokens: [Int]
-        if let cached = promptCache, cached.key == key {
-            tokens = cached.tokens
-            diagnostics.promptCacheHit = true
-        } else if key.budget > 0, let tokenizer = whisperKit.tokenizer {
-            let words = request.vocabulary.map { $0.precomposedStringWithCanonicalMapping }
-            let prompt = VocabularyPrompt.text(for: words, maxTokens: key.budget) {
-                tokenizer.encode(text: " " + $0).count
-            }
-            tokens = prompt.isEmpty ? [] : tokenizer.encode(text: " " + prompt).filter { $0 < tokenizer.specialTokens.specialTokenBegin }
-            promptCache = (key, tokens)
-        } else {
-            tokens = []
-            promptCache = (key, tokens)
-        }
+        let budget = min(200, max(0, request.promptTokenBudget))
+        let glossary = glossaryTokens(
+            for: request.vocabulary, language: language,
+            budget: request.context.isEmpty ? budget : min(budget, 200 - Self.contextTokenLimit),
+            tokenizer: whisperKit.tokenizer, diagnostics: &diagnostics
+        )
+        let tokens = glossary + contextTokens(for: request.context, tokenizer: whisperKit.tokenizer)
         diagnostics.promptDuration = ProcessInfo.processInfo.systemUptime - promptStart
         diagnostics.promptTokenCount = tokens.count
         options.promptTokens = tokens.isEmpty ? nil : tokens
@@ -194,6 +189,34 @@ final class TranscriptionService: Transcribing {
             text: results.map(\.text).joined(separator: " "), language: results.first?.language ?? language,
             diagnostics: diagnostics, needsReview: needsReview
         )
+    }
+
+    /// Dictionary words keep their priority order and stay whole; the result is
+    /// cached because the vocabulary rarely changes between dictations.
+    private func glossaryTokens(for vocabulary: [String], language: String?, budget: Int,
+                                tokenizer: WhisperTokenizer?, diagnostics: inout TranscriptionDiagnostics) -> [Int] {
+        let key = PromptKey(vocabulary: vocabulary, language: language, budget: budget)
+        if let cached = promptCache, cached.key == key {
+            diagnostics.promptCacheHit = true
+            return cached.tokens
+        }
+        var tokens: [Int] = []
+        if budget > 0, let tokenizer {
+            let words = vocabulary.map { $0.precomposedStringWithCanonicalMapping }
+            let prompt = VocabularyPrompt.text(for: words, maxTokens: budget) {
+                tokenizer.encode(text: " " + $0).count
+            }
+            tokens = prompt.isEmpty ? [] : tokenizer.encode(text: " " + prompt).filter { $0 < tokenizer.specialTokens.specialTokenBegin }
+        }
+        promptCache = (key, tokens)
+        return tokens
+    }
+
+    private func contextTokens(for context: String, tokenizer: WhisperTokenizer?) -> [Int] {
+        let text = context.precomposedStringWithCanonicalMapping.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, let tokenizer else { return [] }
+        let tokens = tokenizer.encode(text: " " + text).filter { $0 < tokenizer.specialTokens.specialTokenBegin }
+        return Array(tokens.suffix(Self.contextTokenLimit))
     }
 
     /// Whisper captions sound events as "(music)", "[BLANK_AUDIO]", "*sigh*" or "♪".

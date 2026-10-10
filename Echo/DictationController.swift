@@ -52,6 +52,10 @@ final class DictationController: ObservableObject {
     private var checksPermissions = true
     private var activeSession: Session?
     private var lastSessionID: UUID?
+    /// The previous transcript, kept in memory only, becomes prompt context
+    /// for the next dictation into the same app within a few minutes.
+    private var recentContext: (text: String, bundleID: String?, at: ContinuousClock.Instant)?
+    private static let recentContextLifetime: Duration = .seconds(300)
     private var cancellationMessage: String?
     private var isTerminating = false
     private var modelLoadingDuration: TimeInterval?
@@ -427,13 +431,20 @@ final class DictationController: ObservableObject {
         let language = WhisperModelCatalog.supportsMultilingual(settings.modelVariant)
             ? (settings.transcriptionLanguage == "auto" ? nil : settings.transcriptionLanguage)
             : "en"
+        let app = NSWorkspace.shared.frontmostApplication
+        var context = ""
+        if settings.useRecentContext, let recentContext, recentContext.bundleID == app?.bundleIdentifier,
+           recentContext.at.duration(to: started) < Self.recentContextLifetime {
+            context = recentContext.text
+        }
         var session = Session(
             id: id, started: started, target: nil,
-            app: NSWorkspace.shared.frontmostApplication, modelVariant: settings.modelVariant,
+            app: app, modelVariant: settings.modelVariant,
             request: TranscriptionRequest(vocabulary: dictionary?.promptWords ?? [],
                                           language: language,
                                           promptTokenBudget: settings.vocabularyTokenBudget,
-                                          temperatureFallbackCount: settings.decodingFallbackCount),
+                                          temperatureFallbackCount: settings.decodingFallbackCount,
+                                          context: context),
             replacements: dictionary?.compiledReplacementRules ?? [],
             snippets: settings.expandSnippets ? (snippets?.compiledRules ?? []) : [],
             keepOnClipboard: settings.copyTranscriptToClipboard, saveHistory: settings.saveHistory)
@@ -611,10 +622,12 @@ final class DictationController: ObservableObject {
             }
             let replacementRules = session.replacements
             let snippetRules = session.snippets
-            text = await Task.detached(priority: .userInitiated) {
-                var processed = ReplacementProcessor(rules: replacementRules).process(text)
-                processed = SnippetProcessor(rules: snippetRules).process(processed)
-                return processed
+            // Context uses corrected spellings but not snippet expansions, which
+            // are inserted text rather than speech.
+            let corrected: String
+            (corrected, text) = await Task.detached(priority: .userInitiated) {
+                let corrected = ReplacementProcessor(rules: replacementRules).process(text)
+                return (corrected, SnippetProcessor(rules: snippetRules).process(corrected))
             }.value
             let processingDuration = processingStarted.duration(to: .now).timeInterval
             guard activeSession?.id == session.id, !Task.isCancelled else { return }
@@ -639,6 +652,8 @@ final class DictationController: ObservableObject {
             }
             lastTranscript = text
             lastSessionID = session.id
+            // A transcript flagged for review may be wrong; do not carry it forward.
+            recentContext = output.needsReview ? nil : (corrected, session.app?.bundleIdentifier, .now)
             let insertionStarted = ContinuousClock.now
             let keepOnClipboard = session.keepOnClipboard
             var outcome: DictationOutcome = .pasteDispatched

@@ -60,6 +60,10 @@ final class SettingsStore: ObservableObject {
     @Published var decodingFallbackCount: Int {
         didSet { defaults.set(decodingFallbackCount, forKey: Keys.decodingFallbackCount) }
     }
+    /// Pass the previous transcript in the same app to the model as context.
+    @Published var useRecentContext: Bool {
+        didSet { defaults.set(useRecentContext, forKey: Keys.useRecentContext) }
+    }
     @Published var expandSnippets: Bool {
         didSet { defaults.set(expandSnippets, forKey: Keys.expandSnippets) }
     }
@@ -95,6 +99,7 @@ final class SettingsStore: ObservableObject {
         static let transcriptionLanguage = "transcriptionLanguage"
         static let vocabularyTokenBudget = "vocabularyTokenBudget"
         static let decodingFallbackCount = "decodingFallbackCount"
+        static let useRecentContext = "useRecentContext"
         static let expandSnippets = "expandSnippets"
         static let saveUsageStatistics = "saveUsageStatistics"
         static let usageRetentionDays = "usageRetentionDays"
@@ -116,6 +121,7 @@ final class SettingsStore: ObservableObject {
         self.transcriptionLanguage = defaults.string(forKey: Keys.transcriptionLanguage) ?? "en"
         self.vocabularyTokenBudget = min(200, max(0, defaults.object(forKey: Keys.vocabularyTokenBudget) as? Int ?? 200))
         self.decodingFallbackCount = min(5, max(0, defaults.object(forKey: Keys.decodingFallbackCount) as? Int ?? 5))
+        self.useRecentContext = defaults.object(forKey: Keys.useRecentContext) as? Bool ?? true
         self.expandSnippets = defaults.object(forKey: Keys.expandSnippets) as? Bool ?? true
         self.saveUsageStatistics = defaults.object(forKey: Keys.saveUsageStatistics) as? Bool ?? true
         self.usageRetentionDays = max(0, defaults.object(forKey: Keys.usageRetentionDays) as? Int ?? 0)
