@@ -9,28 +9,29 @@ enum SpeechChunker {
     /// The service appends a one-second tail, so 28 s keeps every chunk
     /// inside one 30-second window with margin.
     static let maximumChunkSamples = 28 * sampleRate
-    /// Cut points are searched within four seconds of the even split point.
+    /// Cut points are searched in the final eight seconds of each chunk.
     static let searchSamples = 8 * sampleRate
+    /// A short final chunk decoded with only the previous chunk's text as its
+    /// prompt can come back empty or as a caption such as "Thank you."
+    static let minimumChunkSamples = 10 * sampleRate
     static let frameSamples = 320
     /// A 200 ms window finds a pause between words rather than a stop consonant.
     static let pauseFrames = 10
 
-    /// Chunks are kept near equal length, so a 29-second recording becomes two
-    /// ~14-second chunks rather than 28 s plus a 1-second tail. A short chunk
-    /// decoded with only the previous chunk's text as its prompt can come back
-    /// empty or as a caption such as "Thank you." Every chunk is at least ~10 s.
+    /// Chunks are cut near 28 s, the length measured in replay. When that
+    /// would leave a final chunk under 10 s, the last two chunks are split
+    /// evenly instead, so a 29-second recording becomes two ~14-second chunks.
     static func chunks(_ samples: [Float]) -> [Range<Int>] {
         guard samples.count > maximumChunkSamples else { return [samples.indices] }
         var ranges: [Range<Int>] = []
         var start = 0
         while samples.count - start > maximumChunkSamples {
             let remaining = samples.count - start
-            let count = (remaining + maximumChunkSamples - 1) / maximumChunkSamples
-            // Search around the even split point, but never so early that the
-            // rest no longer fits in the remaining chunks.
-            let end = start + min(maximumChunkSamples, remaining / count + searchSamples / 2)
-            let lower = max(end - searchSamples, samples.count - (count - 1) * maximumChunkSamples)
-            let cut = quietestPoint(in: samples, range: lower..<end)
+            let length = remaining < maximumChunkSamples + minimumChunkSamples
+                ? remaining / 2 + searchSamples / 2
+                : maximumChunkSamples
+            let end = start + min(maximumChunkSamples, length)
+            let cut = quietestPoint(in: samples, range: (end - searchSamples)..<end)
             ranges.append(start..<cut)
             start = cut
         }
