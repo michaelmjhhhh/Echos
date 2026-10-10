@@ -60,14 +60,14 @@ final class VoiceActivityTrimmerTests: XCTestCase {
     func testAllSilenceFallsBackWithoutChangingSamples() {
         let original = frames(40, amplitude: 0.0001)
         let result = VoiceActivityTrimmer(configuration: configuration).trim(capture(original))
-        XCTAssertEqual(result.fallbackReason, .noReliableSpeech)
+        XCTAssertEqual(result.fallbackReason, .noSpeechOnset)
         XCTAssertEqual(result.samples, original)
     }
 
     func testQuietAmbiguousAudioFallsBack() {
         let original = frames(40, amplitude: 0.001)
         let result = VoiceActivityTrimmer(configuration: configuration).trim(capture(original))
-        XCTAssertEqual(result.fallbackReason, .noReliableSpeech)
+        XCTAssertEqual(result.fallbackReason, .noSpeechOnset)
         XCTAssertEqual(result.samples, original)
     }
 

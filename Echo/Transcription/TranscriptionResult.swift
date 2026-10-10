@@ -5,12 +5,17 @@ struct TranscriptionRequest: Sendable {
     var language: String?
     var promptTokenBudget: Int
     var temperatureFallbackCount: Int
+    /// Recent text dictated just before this audio. Whisper reads the end of
+    /// the prompt as preceding speech, which carries names and casing forward.
+    var context: String
 
-    init(vocabulary: [String] = [], language: String? = nil, promptTokenBudget: Int = 200, temperatureFallbackCount: Int = 5) {
+    init(vocabulary: [String] = [], language: String? = nil, promptTokenBudget: Int = VocabularyPrompt.defaultTokenBudget,
+         temperatureFallbackCount: Int = 5, context: String = "") {
         self.vocabulary = vocabulary
         self.language = language
-        self.promptTokenBudget = min(200, max(0, promptTokenBudget))
+        self.promptTokenBudget = min(VocabularyPrompt.promptTokenLimit, max(0, promptTokenBudget))
         self.temperatureFallbackCount = min(5, max(0, temperatureFallbackCount))
+        self.context = context
     }
 }
 

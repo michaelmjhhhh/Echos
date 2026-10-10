@@ -197,14 +197,12 @@ struct SettingsView: View {
                 Picker("Dictionary hints", selection: $settings.vocabularyTokenBudget) {
                     Text("Off").tag(0)
                     Text("25 tokens").tag(25)
-                    Text("50 tokens").tag(50)
-                    Text("100 tokens").tag(100)
-                    Text("200 tokens (default)").tag(200)
+                    Text("50 tokens (default)").tag(50)
                 }
                 .labelsHidden()
                 .frame(width: EchoLayout.settingsControlWidth)
             }
-            footnote("Tokens are small pieces of text. A smaller hint limit may be faster but includes fewer dictionary terms. Star the terms you need most. Saved spelling corrections still apply with hints off.")
+            footnote("Tokens are small pieces of text. 50 tokens holds about 15 terms; longer hints caused empty transcripts in testing. Star the terms you need most. Saved spelling corrections still apply with hints off.")
             hairline
             labeledRow("Retry difficult speech") {
                 Picker("Retry difficult speech", selection: $settings.decodingFallbackCount) {
@@ -217,6 +215,11 @@ struct SettingsView: View {
                 .frame(width: EchoLayout.settingsControlWidth)
             }
             footnote("Fewer retries can reduce waiting on unclear audio and may reduce recognition quality.")
+            hairline
+            labeledRow("Use recent dictation as context") {
+                Toggle("Use recent dictation as context", isOn: $settings.useRecentContext).labelsHidden().toggleStyle(.switch).controlSize(.small)
+            }
+            footnote("Your previous transcript in the same app, from the last five minutes, helps recognize names and terms you just used. It stays in memory and is never saved. Used with Tiny (English) only; other models have not shown a gain.")
             hairline
             labeledRow("Expand spoken snippets") {
                 Toggle("Expand spoken snippets", isOn: $settings.expandSnippets).labelsHidden().toggleStyle(.switch).controlSize(.small)

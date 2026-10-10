@@ -39,7 +39,7 @@ struct VoiceActivityTrimmer: AudioTrimming {
         )
 
         guard let firstSpeechFrame = onsetFrame(in: energies, threshold: startThreshold) else {
-            return .fallback(captured, reason: .noReliableSpeech)
+            return .fallback(captured, reason: .noSpeechOnset)
         }
         let lastActiveFrame = finalActiveFrame(
             in: energies,

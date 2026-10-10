@@ -23,6 +23,10 @@ final class TranscriptionService: Transcribing {
         let budget: Int
     }
     private var promptCache: (key: PromptKey, tokens: [Int])?
+    private var nonSpeechTokens: [Int] = []
+    /// Recent text goes last in the prompt, where Whisper reads it as the
+    /// preceding speech. A short suffix is enough to carry names and casing.
+    static let contextTokenLimit = 48
 
     init(modelVariant: String, downloadBase: URL? = nil) {
         self.modelVariant = modelVariant
@@ -69,7 +73,8 @@ final class TranscriptionService: Transcribing {
                 load: false,
                 download: false
             ))
-            kit.tokenizer = try LocalWhisperTokenizer(tokenizer: tokenizer)
+            let whisperTokenizer = try LocalWhisperTokenizer(tokenizer: tokenizer)
+            kit.tokenizer = whisperTokenizer
             try await kit.loadModels()
             if let logitsSize = kit.textDecoder.logitsSize {
                 (kit.textDecoder as? TextDecoder)?.isModelMultilingual = logitsSize != 51_864
@@ -89,6 +94,7 @@ final class TranscriptionService: Transcribing {
             try Task.checkCancellation()
             whisperKit = kit
             promptCache = nil
+            nonSpeechTokens = Self.nonSpeechTokens(whisperTokenizer)
             await gate.release()
         } catch {
             whisperKit = nil
@@ -135,33 +141,43 @@ final class TranscriptionService: Transcribing {
             // Preserve WhisperKit's one-second synthetic-tail safeguard. The
             // adapter appends that second below so real final words are eligible
             // even when they fall just after a 30-second window boundary.
-            windowClipTime: 1, concurrentWorkerCount: 1
+            windowClipTime: 1,
+            // WhisperKit 0.18 suppresses no tokens by default. suppressBlank is
+            // left off: its filter compares against the prefill cache length and
+            // never fires once the prompt tokens are in the token list.
+            supressTokens: nonSpeechTokens,
+            concurrentWorkerCount: 1
         )
+        let chunks = SpeechChunker.chunks(samples)
         let promptStart = ProcessInfo.processInfo.systemUptime
-        let key = PromptKey(vocabulary: request.vocabulary, language: language, budget: min(200, max(0, request.promptTokenBudget)))
-        let tokens: [Int]
-        if let cached = promptCache, cached.key == key {
-            tokens = cached.tokens
-            diagnostics.promptCacheHit = true
-        } else if key.budget > 0, let tokenizer = whisperKit.tokenizer {
-            let words = request.vocabulary.map { $0.precomposedStringWithCanonicalMapping }
-            let prompt = VocabularyPrompt.text(for: words, maxTokens: key.budget) {
-                tokenizer.encode(text: " " + $0).count
-            }
-            tokens = prompt.isEmpty ? [] : tokenizer.encode(text: " " + prompt).filter { $0 < tokenizer.specialTokens.specialTokenBegin }
-            promptCache = (key, tokens)
-        } else {
-            tokens = []
-            promptCache = (key, tokens)
-        }
+        // Later chunks always receive the previous chunk as context, so long
+        // recordings reserve its share of the prompt from the first chunk on.
+        let reservesContext = !request.context.isEmpty || chunks.count > 1
+        // WhisperKit drops the start of a longer prompt, which holds the starred words.
+        let limit = VocabularyPrompt.promptTokenLimit - (reservesContext ? Self.contextTokenLimit : 0)
+        let glossary = glossaryTokens(
+            for: request.vocabulary, language: language,
+            budget: min(limit, max(0, request.promptTokenBudget)),
+            tokenizer: whisperKit.tokenizer, diagnostics: &diagnostics
+        )
         diagnostics.promptDuration = ProcessInfo.processInfo.systemUptime - promptStart
-        diagnostics.promptTokenCount = tokens.count
-        options.promptTokens = tokens.isEmpty ? nil : tokens
-        var input = samples
-        input.append(contentsOf: repeatElement(0, count: Int(options.windowClipTime * 16_000)))
+        var context = request.context
+        var results: [TranscriptionResult] = []
         let decodeStart = ProcessInfo.processInfo.systemUptime
-        let results = try await whisperKit.transcribe(audioArray: input, decodeOptions: options)
-        try Task.checkCancellation()
+        for range in chunks {
+            let contextStart = ProcessInfo.processInfo.systemUptime
+            let tokens = glossary + contextTokens(for: context, tokenizer: whisperKit.tokenizer)
+            diagnostics.promptDuration += ProcessInfo.processInfo.systemUptime - contextStart
+            diagnostics.promptTokenCount = max(diagnostics.promptTokenCount, tokens.count)
+            options.promptTokens = tokens.isEmpty ? nil : tokens
+            var input = Array(samples[range])
+            input.append(contentsOf: repeatElement(0, count: Int(options.windowClipTime * 16_000)))
+            let chunkResults = try await whisperKit.transcribe(audioArray: input, decodeOptions: options)
+            try Task.checkCancellation()
+            results += chunkResults
+            let text = chunkResults.map(\.text).joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !text.isEmpty { context = String((context + " " + text).suffix(1_000)) }
+        }
         diagnostics.inferenceDuration = ProcessInfo.processInfo.systemUptime - decodeStart
         let segments = results.flatMap(\.segments)
         for result in results {
@@ -187,6 +203,52 @@ final class TranscriptionService: Transcribing {
             text: results.map(\.text).joined(separator: " "), language: results.first?.language ?? language,
             diagnostics: diagnostics, needsReview: needsReview
         )
+    }
+
+    /// Dictionary words keep their priority order and stay whole; the result is
+    /// cached because the vocabulary rarely changes between dictations.
+    private func glossaryTokens(for vocabulary: [String], language: String?, budget: Int,
+                                tokenizer: WhisperTokenizer?, diagnostics: inout TranscriptionDiagnostics) -> [Int] {
+        let key = PromptKey(vocabulary: vocabulary, language: language, budget: budget)
+        if let cached = promptCache, cached.key == key {
+            diagnostics.promptCacheHit = true
+            return cached.tokens
+        }
+        var tokens: [Int] = []
+        if budget > 0, let tokenizer {
+            let words = vocabulary.map { $0.precomposedStringWithCanonicalMapping }
+            let prompt = VocabularyPrompt.text(for: words, maxTokens: budget) {
+                tokenizer.encode(text: " " + $0).count
+            }
+            tokens = prompt.isEmpty ? [] : Self.textTokens(" " + prompt, tokenizer)
+        }
+        promptCache = (key, tokens)
+        return tokens
+    }
+
+    private func contextTokens(for context: String, tokenizer: WhisperTokenizer?) -> [Int] {
+        let text = context.precomposedStringWithCanonicalMapping.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, let tokenizer else { return [] }
+        return Array(Self.textTokens(" " + text, tokenizer).suffix(Self.contextTokenLimit))
+    }
+
+    private static func textTokens(_ text: String, _ tokenizer: WhisperTokenizer) -> [Int] {
+        tokenizer.encode(text: text).filter { $0 < tokenizer.specialTokens.specialTokenBegin }
+    }
+
+    /// Whisper captions sound events as "(music)", "[BLANK_AUDIO]", "*sigh*" or "♪".
+    /// Suppress the single tokens that open them, a subset of OpenAI's default
+    /// suppress list. Punctuation people dictate (colon, slash, @, #) stays allowed.
+    private static func nonSpeechTokens(_ tokenizer: WhisperTokenizer) -> [Int] {
+        let symbols = ["(", "[", "{", "*", "((", "[[", "{{", "(((", "-(", "-[", "('", "(\"", "♪", "♪♪", "♪♪♪", "♩", "♫", "♬"]
+        var tokens = Set<Int>()
+        for symbol in symbols {
+            for text in [symbol, " " + symbol] {
+                let encoded = textTokens(text, tokenizer)
+                if encoded.count == 1 { tokens.insert(encoded[0]) }
+            }
+        }
+        return tokens.sorted()
     }
 }
 

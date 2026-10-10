@@ -4,13 +4,27 @@ All user-facing and engineering changes are recorded here. Model weights are unc
 
 ## [Unreleased]
 
+### Added
+
+- Add "Use recent dictation as context" (on by default). With Tiny (English), the previous transcript in the same app from the last five minutes is passed to the model, so names just used are recognized again. It stays in memory only. Other models ignore it: Distil Large v3 showed no gain in replay and returned empty text for most clips when context was used without dictionary words.
+- Add an optional per-case `context` field to `EchoEvaluate` manifests, and report dropped silence captions and post-filter false insertions.
+
 ### Changed
 
+- Lower the default dictionary hint budget from 200 to 50 tokens and clamp saved 100- or 200-token budgets to 50. WhisperKit keeps only the last 111 prompt tokens, so longer prompts dropped starred terms first.
+- Split recordings over 28 seconds at the quietest pause in the last 8 seconds of each 28-second span, and decode the chunks in order, passing earlier text to each chunk as context. When the final chunk would be under 10 seconds, the last two chunks are split about evenly, each 10 seconds or longer. In synthetic replay, long-recording WER fell from 0.238 to 0.174 for Distil Large v3 without dictionary words and from 0.077 to 0.049 for Tiny at 50 tokens, and words near 30- and 60-second window edges were no longer dropped. Only two long synthetic passages were measured.
+- Usage records report `noSpeechOnset` as the trim reason when no speech onset was found; such recordings were previously recorded as `noReliableSpeech`.
 - Use the current transcription, insertion, history-persistence, and capture-generation interfaces throughout the app and existing test adapters. Usage checks share one bounded wait for the published snapshots used by the UI.
 
 ### Removed
 
 - Remove unused model-installation state and inactive-model repair, obsolete rule and transcription-segment projections, and redundant card and history-flush wrappers. Active-model repair and persistence recovery remain available.
+
+### Fixed
+
+- Stop pasting "Thank you." and similar stock captions when the hotkey is held without speech. The transcript is dropped only when the trimmer found no speech onset and every sentence or comma-separated part is a known caption phrase ("Thank you, thank you.") or the text has no letters or digits. Text containing digits is kept. In replay, Tiny returned "you" for both noise clips and both were dropped. Keyboard or breath noise loud enough to count as an onset can still let a caption through.
+- Suppress the tokens that open sound-event captions such as "[BLANK_AUDIO]", "(blender whirring)", "*sigh*" and music symbols, a subset of OpenAI's default suppress list. Dictated ":", "/", "@" and "#" are still allowed.
+- Fix empty transcripts with large dictionaries. With the old 200-token default and a 49-word dictionary, Distil Large v3 returned empty text for 13 of 24 synthetic speech clips; at 50 tokens it returned none. All accuracy figures in this Unreleased entry come from synthetic `say` speech replayed through `EchoEvaluate` for Tiny (English) and Distil Large v3; they are not real-microphone measurements, and the other catalog models were not tested.
 
 ## [0.4.0] - 2026-09-25
 

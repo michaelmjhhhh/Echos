@@ -54,6 +54,8 @@ struct CapturedAudio: Sendable, Equatable {
 enum TrimFallbackReason: String, Sendable, Equatable {
     case emptyInput
     case invalidInput
+    /// No frame run ever reached the speech threshold.
+    case noSpeechOnset
     case noReliableSpeech
     case speechTooShort
     case excessiveTrim

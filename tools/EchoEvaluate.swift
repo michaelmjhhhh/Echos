@@ -83,8 +83,8 @@ struct EchoEvaluate {
         }
         for item in manifest.cases {
             guard !item.id.isEmpty, item.id.count <= 100, item.reference.count <= 16_000,
-                  (item.finalReference?.count ?? 0) <= 16_000 else {
-                throw EvaluationError.invalid("Case IDs must be 1–100 characters and references at most 16,000 characters.")
+                  (item.finalReference?.count ?? 0) <= 16_000, (item.context?.count ?? 0) <= 16_000 else {
+                throw EvaluationError.invalid("Case IDs must be 1–100 characters and references and context at most 16,000 characters.")
             }
             // Paths are relative to the manifest; absolute paths are permitted for local corpora.
             let audioURL = URL(fileURLWithPath: item.audio, relativeTo: manifestURL.deletingLastPathComponent()).standardizedFileURL
@@ -118,11 +118,13 @@ struct EchoEvaluate {
                             let asrStart = ProcessInfo.processInfo.systemUptime
                             let output = try await service.transcribe(selected.samples, request: .init(
                                 vocabulary: vocabulary, language: options.language,
-                                promptTokenBudget: budget, temperatureFallbackCount: options.fallbacks
+                                promptTokenBudget: budget, temperatureFallbackCount: options.fallbacks,
+                                context: item.context ?? ""
                             ))
                             let asrSeconds = ProcessInfo.processInfo.systemUptime - asrStart
                             let processStart = ProcessInfo.processInfo.systemUptime
-                            let finalText = processors.reduce(output.text) { $1.process($0) }
+                            let dropped = SilenceHallucination.shouldDrop(output.text, trimReason: selected.fallbackReason)
+                            let finalText = processors.reduce(dropped ? "" : output.text) { $1.process($0) }
                             let processingSeconds = ProcessInfo.processInfo.systemUptime - processStart
                             let releaseSeconds = ProcessInfo.processInfo.systemUptime - releaseStart
                             let diagnostics = output.diagnostics
@@ -131,6 +133,7 @@ struct EchoEvaluate {
                                 "firstReplayAfterLoad": replayIndex == 0, "engineState": "loadedAndWarmed",
                                 "durationBucket": durationBucket(captured.duration),
                                 "audioSHA256": audioFingerprint, "promptBudget": budget, "trimEnabled": trim,
+                                "hasContext": !(item.context ?? "").isEmpty,
                                 "recordedSeconds": captured.duration, "selectedSeconds": Double(selected.samples.count) / 16_000,
                                 "audioLoadSeconds": audioLoadSeconds, "trimSeconds": trimSeconds,
                                 "asrSeconds": asrSeconds, "processingSeconds": processingSeconds, "releaseToResultSeconds": releaseSeconds,
@@ -147,7 +150,9 @@ struct EchoEvaluate {
                                 "rawCER": score(characters(item.reference), characters(output.text)),
                                 "falseInsertion": item.reference.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !output.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                                 "falseRejection": !item.reference.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && output.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                                "rawCharacterCount": output.text.count, "finalCharacterCount": finalText.count
+                                "rawCharacterCount": output.text.count, "finalCharacterCount": finalText.count,
+                                "silenceHallucinationDropped": dropped,
+                                "finalFalseInsertion": item.reference.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !finalText.isEmpty
                             ]
                             if let language = output.language { row["detectedLanguage"] = language }
                             if let value = diagnostics.averageLogProbability, value.isFinite { row["averageLogProbability"] = value }
@@ -295,7 +300,7 @@ struct EchoEvaluate {
 }
 
 private struct Manifest: Decodable {
-    struct Case: Decodable { let id: String; let audio: String; let reference: String; let finalReference: String? }
+    struct Case: Decodable { let id: String; let audio: String; let reference: String; let finalReference: String?; let context: String? }
     struct Replacement: Decodable { let from: String; let to: String; let allowProtectedText: Bool? }
     struct SnippetRule: Decodable { let trigger: String; let expansion: String; let standaloneOnly: Bool?; let allowProtectedText: Bool? }
     let cases: [Case]
@@ -391,7 +396,7 @@ private struct Options {
 
     Manifest schema (audio paths relative to manifest):
     {"cases":[{"id":"clip-001","audio":"clip.wav","reference":"hello",
-                "finalReference":"hello"}],
+                "finalReference":"hello","context":"Text dictated just before."}],
      "vocabulary":["Echo"], "replacements":[{"from":"eko","to":"Echo"}],
      "snippets":[{"trigger":"my signature","expansion":"Best, Alex",
                    "standaloneOnly":false,"allowProtectedText":false}]}
