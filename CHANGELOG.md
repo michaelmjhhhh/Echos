@@ -4,13 +4,27 @@ All user-facing and engineering changes are recorded here. Model weights are unc
 
 ## [Unreleased]
 
+### Added
+
+- Add "Use recent dictation as context" (on by default). With Tiny (English), the previous transcript in the same app from the last five minutes is passed to the model, so names just used are recognized again. It stays in memory only. Other models ignore it: Distil Large v3 showed no gain in replay and returned empty text for most clips when context was used without dictionary words.
+- Add an optional per-case `context` field to `EchoEvaluate` manifests, and report dropped silence captions and post-filter false insertions.
+
 ### Changed
 
+- Lower the default dictionary hint budget from 200 to 50 tokens and clamp saved 100- or 200-token budgets to 50. WhisperKit keeps only the last 111 prompt tokens, so longer prompts dropped starred terms first.
+- Split recordings over 28 seconds at the quietest pause near each 28-second mark and decode the chunks in order, passing earlier text to each chunk as context.
 - Use the current transcription, insertion, history-persistence, and capture-generation interfaces throughout the app and existing test adapters. Usage checks share one bounded wait for the published snapshots used by the UI.
 
 ### Removed
 
 - Remove unused model-installation state and inactive-model repair, obsolete rule and transcription-segment projections, and redundant card and history-flush wrappers. Active-model repair and persistence recovery remain available.
+
+### Fixed
+
+- Stop pasting "Thank you." and similar stock captions when the hotkey is held without speech. The transcript is dropped only when the trimmer found no speech onset and the text is a known caption phrase or symbols only. In replay, Tiny returned "you" for both noise clips and both were dropped. Keyboard or breath noise loud enough to count as an onset can still let a caption through.
+- Suppress sound-event captions such as "[BLANK_AUDIO]", "(blender whirring)", "*" and music symbols, and block an empty first token, matching OpenAI's decoder defaults.
+- Fix empty transcripts with large dictionaries. With the old 200-token default and a 49-word dictionary, Distil Large v3 returned empty text for 13 of 24 synthetic speech clips; at 50 tokens it returned none.
+- Accuracy results come from synthetic `say` speech replayed through `EchoEvaluate` for Tiny (English) and Distil Large v3 only. They are not real-microphone measurements, and the other catalog models were not tested.
 
 ## [0.4.0] - 2026-09-25
 
