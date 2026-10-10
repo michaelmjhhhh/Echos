@@ -4,6 +4,8 @@ All user-facing and engineering changes are recorded here. Model weights are unc
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-10-10
+
 ### Changed
 
 - Polish every main-window page within the existing design system. Transcript rows show Copy and Open side by side and reveal them on hover or keyboard focus. History groups transcripts by day and shows a total count. The Home hero no longer reserves space for an empty actions row. Insights shows the words-per-minute window (last 30 days), lists result counts as label/value pairs, widens app names before truncating, and sizes the activity calendar to the card width. Settings controls share one right edge.
@@ -11,10 +13,11 @@ All user-facing and engineering changes are recorded here. Model weights are unc
 - The Dictionary sort menu uses the same text color as the buttons beside it, and a starred word's star sits at the card's trailing edge.
 - Snippet rows open the editor on a single click, as dictionary cards do, and deleting a snippet now asks for confirmation.
 - Counts use singular nouns for one item, for example "1 word" instead of "1 words".
-
 - Ignore `.pi-subagents/` and stop tracking its generated subagent artifacts.
 - Add `skills-lock.json`, which pins the `code-review` and `codebase-design` agent skills by source and hash.
 - `AGENTS.md` now forbids adding the agent as a commit co-author.
+
+The interface changes are covered only by a successful build and the existing automated checks; there are no automated visual checks, and light mode and small window sizes were not reviewed. Recognition and insertion code is unchanged from 0.5.0.
 
 ## [0.5.0] - 2026-10-10
 
@@ -86,7 +89,8 @@ All user-facing and engineering changes are recorded here. Model weights are unc
 
 - Publish the first GitHub release with a DMG for Apple Silicon Macs running macOS 14 or later.
 
-[Unreleased]: https://github.com/michaelmjhhhh/Echos/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/michaelmjhhhh/Echos/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/michaelmjhhhh/Echos/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/michaelmjhhhh/Echos/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/michaelmjhhhh/Echos/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/michaelmjhhhh/Echos/compare/v0.2.0...v0.3.0
