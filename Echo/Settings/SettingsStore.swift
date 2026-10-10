@@ -119,7 +119,9 @@ final class SettingsStore: ObservableObject {
         self.saveHistory = defaults.object(forKey: Keys.saveHistory) as? Bool ?? true
         self.copyTranscriptToClipboard = defaults.object(forKey: Keys.copyTranscriptToClipboard) as? Bool ?? true
         self.transcriptionLanguage = defaults.string(forKey: Keys.transcriptionLanguage) ?? "en"
-        self.vocabularyTokenBudget = min(200, max(0, defaults.object(forKey: Keys.vocabularyTokenBudget) as? Int ?? 200))
+        // Saved 100- and 200-token budgets made prompts fail in replay; clamp them.
+        self.vocabularyTokenBudget = min(VocabularyPrompt.maximumTokenBudget, max(0,
+            defaults.object(forKey: Keys.vocabularyTokenBudget) as? Int ?? VocabularyPrompt.defaultTokenBudget))
         self.decodingFallbackCount = min(5, max(0, defaults.object(forKey: Keys.decodingFallbackCount) as? Int ?? 5))
         self.useRecentContext = defaults.object(forKey: Keys.useRecentContext) as? Bool ?? true
         self.expandSnippets = defaults.object(forKey: Keys.expandSnippets) as? Bool ?? true

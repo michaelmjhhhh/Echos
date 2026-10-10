@@ -25,8 +25,7 @@ final class TranscriptionService: Transcribing {
     private var promptCache: (key: PromptKey, tokens: [Int])?
     private var nonSpeechTokens: [Int] = []
     /// Recent text goes last in the prompt, where Whisper reads it as the
-    /// preceding speech. A short suffix is enough to carry names and casing,
-    /// and it leaves most of the 200-token prompt to the dictionary.
+    /// preceding speech. A short suffix is enough to carry names and casing.
     static let contextTokenLimit = 48
 
     init(modelVariant: String, downloadBase: URL? = nil) {
@@ -153,10 +152,11 @@ final class TranscriptionService: Transcribing {
         // Later chunks always receive the previous chunk as context, so long
         // recordings reserve its share of the prompt from the first chunk on.
         let reservesContext = !request.context.isEmpty || chunks.count > 1
-        let budget = min(200, max(0, request.promptTokenBudget))
+        // WhisperKit drops the start of a longer prompt, which holds the starred words.
+        let limit = VocabularyPrompt.promptTokenLimit - (reservesContext ? Self.contextTokenLimit : 0)
         let glossary = glossaryTokens(
             for: request.vocabulary, language: language,
-            budget: reservesContext ? min(budget, 200 - Self.contextTokenLimit) : budget,
+            budget: min(limit, max(0, request.promptTokenBudget)),
             tokenizer: whisperKit.tokenizer, diagnostics: &diagnostics
         )
         diagnostics.promptDuration = ProcessInfo.processInfo.systemUptime - promptStart

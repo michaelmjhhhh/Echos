@@ -9,11 +9,11 @@ struct TranscriptionRequest: Sendable {
     /// the prompt as preceding speech, which carries names and casing forward.
     var context: String
 
-    init(vocabulary: [String] = [], language: String? = nil, promptTokenBudget: Int = 200,
+    init(vocabulary: [String] = [], language: String? = nil, promptTokenBudget: Int = VocabularyPrompt.defaultTokenBudget,
          temperatureFallbackCount: Int = 5, context: String = "") {
         self.vocabulary = vocabulary
         self.language = language
-        self.promptTokenBudget = min(200, max(0, promptTokenBudget))
+        self.promptTokenBudget = min(VocabularyPrompt.promptTokenLimit, max(0, promptTokenBudget))
         self.temperatureFallbackCount = min(5, max(0, temperatureFallbackCount))
         self.context = context
     }
