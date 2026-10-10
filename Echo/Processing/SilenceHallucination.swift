@@ -10,11 +10,17 @@ enum SilenceHallucination {
         "thanks for watching", "thank you for watching", "bye", "bye bye", "the end",
     ]
 
+    /// Each sentence must be a caption ("Thank you. Thank you." is dropped).
+    /// Text with no letters or digits, such as "*" or "...", is also dropped;
+    /// numbers are kept because they may be quiet real speech.
     static func shouldDrop(_ text: String, trimReason: TrimFallbackReason?) -> Bool {
-        guard trimReason == .noSpeechOnset else { return false }
-        let words = text.lowercased()
-            .components(separatedBy: CharacterSet.letters.inverted)
+        guard trimReason == .noSpeechOnset, !text.isEmpty else { return false }
+        guard text.rangeOfCharacter(from: .alphanumerics) != nil else { return true }
+        if text.rangeOfCharacter(from: .decimalDigits) != nil { return false }
+        let sentences = text.lowercased()
+            .components(separatedBy: CharacterSet(charactersIn: ".!?\n"))
+            .map { $0.components(separatedBy: CharacterSet.letters.inverted).filter { !$0.isEmpty }.joined(separator: " ") }
             .filter { !$0.isEmpty }
-        return words.isEmpty ? !text.isEmpty : phrases.contains(words.joined(separator: " "))
+        return !sentences.isEmpty && sentences.allSatisfy(phrases.contains)
     }
 }
