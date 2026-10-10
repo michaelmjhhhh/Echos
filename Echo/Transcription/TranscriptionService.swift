@@ -142,9 +142,10 @@ final class TranscriptionService: Transcribing {
             // adapter appends that second below so real final words are eligible
             // even when they fall just after a 30-second window boundary.
             windowClipTime: 1,
-            // OpenAI's decoder defaults; WhisperKit 0.18 leaves both off. They stop
-            // sound-event captions and an empty first token on quiet audio.
-            suppressBlank: true, supressTokens: nonSpeechTokens,
+            // WhisperKit 0.18 suppresses no tokens by default. suppressBlank is
+            // left off: its filter compares against the prefill cache length and
+            // never fires once the prompt tokens are in the token list.
+            supressTokens: nonSpeechTokens,
             concurrentWorkerCount: 1
         )
         let chunks = SpeechChunker.chunks(samples)
@@ -233,8 +234,8 @@ final class TranscriptionService: Transcribing {
     }
 
     /// Whisper captions sound events as "(music)", "[BLANK_AUDIO]", "*sigh*" or "♪".
-    /// Suppress the single tokens that open them, as OpenAI's decoder does by
-    /// default. Punctuation people dictate (colon, slash, @, #) stays allowed.
+    /// Suppress the single tokens that open them, a subset of OpenAI's default
+    /// suppress list. Punctuation people dictate (colon, slash, @, #) stays allowed.
     private static func nonSpeechTokens(_ tokenizer: WhisperTokenizer) -> [Int] {
         let symbols = ["(", "[", "{", "*", "((", "[[", "{{", "(((", "-(", "-[", "('", "(\"", "♪", "♪♪", "♪♪♪", "♩", "♫", "♬"]
         var tokens = Set<Int>()
