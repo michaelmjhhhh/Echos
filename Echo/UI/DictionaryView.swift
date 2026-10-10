@@ -93,39 +93,13 @@ struct DictionaryView: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            HStack(spacing: 7) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: IconSize.small))
-                    .foregroundStyle(Color.echoSecondary)
-                    .accessibilityHidden(true)
-                TextField("Search words", text: $query)
-                    .textFieldStyle(.plain)
-                    .font(.echo(13))
-                    .foregroundStyle(Color.echoText)
-                    .focused($searchFocused)
-                    .onExitCommand {
-                        // Escape clears the query first, then releases focus.
-                        if query.isEmpty {
-                            searchFocused = false
-                        } else {
-                            query = ""
-                        }
-                    }
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(RoundedRectangle(cornerRadius: Radius.control, style: .continuous).fill(Color.echoCard))
-            .overlay(RoundedRectangle(cornerRadius: Radius.control, style: .continuous).strokeBorder(Color.echoHairline))
-            .echoFocusRing(searchFocused)
+            EchoSearchField(
+                prompt: "Search words",
+                text: $query,
+                focus: $searchFocused,
+                matchCount: query.isEmpty ? nil : filtered.count
+            )
             .help("Search words (⌘F)")
-
-            if !query.isEmpty {
-                Text(filtered.count == 1 ? "1 match" : "\(filtered.count) matches")
-                    .font(.echoMono(10, medium: true))
-                    .tracking(0.7)
-                    .foregroundStyle(Color.echoSecondary)
-                    .monospacedDigit()
-            }
 
             Spacer()
 
@@ -156,15 +130,23 @@ struct DictionaryView: View {
                     .font(.system(size: IconSize.caption))
                 Text(dictionary.sort.label)
                     .font(.echo(12, .medium))
+                Image(systemName: "chevron.down")
+                    .font(.system(size: IconSize.caption, weight: .semibold))
+                    .foregroundStyle(Color.echoSecondary)
             }
             .foregroundStyle(Color.echoText)
+            .padding(.horizontal, Spacing.s)
+            .padding(.vertical, Spacing.xxs + 1)
+            .background(RoundedRectangle(cornerRadius: Radius.control, style: .continuous).fill(Color.echoCard))
+            .overlay(RoundedRectangle(cornerRadius: Radius.control, style: .continuous).strokeBorder(Color.echoHairline))
+            .contentShape(RoundedRectangle(cornerRadius: Radius.control, style: .continuous))
         }
-        .menuStyle(.borderlessButton)
+        // A plain button-style menu draws the label as written; the borderless
+        // style recolored it with the accent, unlike the buttons beside it.
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
         .fixedSize()
-        .padding(.horizontal, Spacing.s)
-        .padding(.vertical, Spacing.xxs + 1)
-        .background(RoundedRectangle(cornerRadius: Radius.control, style: .continuous).fill(Color.echoCard))
-        .overlay(RoundedRectangle(cornerRadius: Radius.control, style: .continuous).strokeBorder(Color.echoHairline))
         .help("Change how words are sorted")
         .accessibilityLabel("Sort words, currently \(dictionary.sort.label)")
     }
@@ -173,13 +155,13 @@ struct DictionaryView: View {
     private var statLine: some View {
         HStack(spacing: Spacing.xs) {
             EyebrowText(text: [
-                count(dictionary.entries.count, "word"),
-                count(dictionary.starredCount, "starred", pluralize: false),
-                count(dictionary.replacementCount, "replacement"),
+                echoCount(dictionary.entries.count, "word"),
+                echoCount(dictionary.starredCount, "starred", plural: "starred"),
+                echoCount(dictionary.replacementCount, "replacement"),
             ].joined(separator: " · "))
             .monospacedDigit()
             .accessibilityLabel(
-                "\(dictionary.entries.count) words, \(dictionary.starredCount) starred, \(dictionary.replacementCount) replacements"
+                "\(echoCount(dictionary.entries.count, "word")), \(dictionary.starredCount) starred, \(echoCount(dictionary.replacementCount, "replacement"))"
             )
 
             if let importSummary {
@@ -210,7 +192,7 @@ struct DictionaryView: View {
                 return
             }
             switch dictionary.importWords(content.components(separatedBy: .newlines)) {
-            case .success(let added): showImportSummary("Imported \(count(added, "word")). Duplicates were skipped.")
+            case .success(let added): showImportSummary("Imported \(echoCount(added, "word")). Duplicates were skipped.")
             case .failure(let error): showImportSummary("Import was not saved. \(error.localizedDescription)")
             }
         }
@@ -224,10 +206,6 @@ struct DictionaryView: View {
             guard !Task.isCancelled else { return }
             withAnimation(reduceMotion ? nil : Motion.exit) { importSummary = nil }
         }
-    }
-
-    private func count(_ n: Int, _ noun: String, pluralize: Bool = true) -> String {
-        "\(n) \(pluralize && n != 1 ? noun + "s" : noun)"
     }
 
     // MARK: - Empty states
@@ -256,7 +234,7 @@ struct DictionaryView: View {
             EchoEmptyState(icon: "magnifyingglass") {
                 Text("No words match “\(query)”.")
             } actions: {
-                Button("Clear Search") {
+                Button("Clear search") {
                     query = ""
                     searchFocused = true
                 }

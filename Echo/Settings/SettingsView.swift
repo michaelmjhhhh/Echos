@@ -17,7 +17,7 @@ struct SettingsView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: Spacing.m) {
                 settingsCard(eyebrow: "Input") {
                     labeledRow("Microphone") {
                         Picker("", selection: $settings.inputDeviceUID) {
@@ -27,7 +27,7 @@ struct SettingsView: View {
                             }
                         }
                         .labelsHidden()
-                        .frame(width: EchoLayout.settingsControlWidth)
+                        .frame(width: EchoLayout.settingsControlWidth, alignment: .trailing)
                     }
                     if let name = controller.activeMicrophoneName {
                         footnote("Last used input: \(name)")
@@ -44,7 +44,7 @@ struct SettingsView: View {
                             }
                         }
                         .labelsHidden()
-                        .frame(width: EchoLayout.settingsControlWidth)
+                        .frame(width: EchoLayout.settingsControlWidth, alignment: .trailing)
                     }
                     if let caveat = settings.hotkey.caveat {
                         // A caveat is a real warning, so it wears the semantic color.
@@ -62,7 +62,7 @@ struct SettingsView: View {
                         }
                         .labelsHidden()
                         .pickerStyle(.segmented)
-                        .frame(width: EchoLayout.settingsControlWidth)
+                        .frame(width: EchoLayout.settingsControlWidth, alignment: .trailing)
                     }
                     hairline
                     labeledRow("Start Echo at login") {
@@ -187,7 +187,7 @@ struct SettingsView: View {
                         Text("Portuguese").tag("pt")
                     }
                     .labelsHidden()
-                    .frame(width: EchoLayout.settingsControlWidth)
+                    .frame(width: EchoLayout.settingsControlWidth, alignment: .trailing)
                 } else {
                     Text("English only for this model").font(.echo(12)).foregroundStyle(Color.echoSecondary)
                 }
@@ -200,7 +200,7 @@ struct SettingsView: View {
                     Text("50 tokens (default)").tag(50)
                 }
                 .labelsHidden()
-                .frame(width: EchoLayout.settingsControlWidth)
+                .frame(width: EchoLayout.settingsControlWidth, alignment: .trailing)
             }
             footnote("Tokens are small pieces of text. 50 tokens holds about 15 terms; longer hints caused empty transcripts in testing. Star the terms you need most. Saved spelling corrections still apply with hints off.")
             hairline
@@ -212,7 +212,7 @@ struct SettingsView: View {
                     Text("Up to 5 times (default)").tag(5)
                 }
                 .labelsHidden()
-                .frame(width: EchoLayout.settingsControlWidth)
+                .frame(width: EchoLayout.settingsControlWidth, alignment: .trailing)
             }
             footnote("Fewer retries can reduce waiting on unclear audio and may reduce recognition quality.")
             hairline
@@ -234,6 +234,7 @@ struct SettingsView: View {
                 Toggle("Keep local usage statistics", isOn: $settings.saveUsageStatistics).labelsHidden().toggleStyle(.switch).controlSize(.small)
             }
             footnote("Counts, app identifiers, dates and timing measurements are stored separately from transcript history. Audio and text are never included in statistics. Turning this off stops new records; existing records remain until deleted or expired.")
+            hairline
             labeledRow("Keep statistics for") {
                 Picker("Keep statistics for", selection: $settings.usageRetentionDays) {
                     Text("Until I delete them").tag(0)
@@ -242,7 +243,7 @@ struct SettingsView: View {
                     Text("1 year").tag(365)
                 }
                 .labelsHidden()
-                .frame(width: EchoLayout.settingsControlWidth)
+                .frame(width: EchoLayout.settingsControlWidth, alignment: .trailing)
             }
             HStack {
                 Button("Export summary…") { exportUsage() }.buttonStyle(EchoSecondaryButtonStyle())

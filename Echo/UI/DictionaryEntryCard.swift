@@ -18,8 +18,9 @@ struct DictionaryEntryCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            // Headword anchors the card's left edge; actions live at the
-            // trailing edge so the hidden state leaves no phantom indent.
+            // Headword anchors the card's left edge. The star sits last so a
+            // starred card shows it pinned to the trailing edge, not floating
+            // beside the invisible edit/delete slots.
             HStack(spacing: 7) {
                 Text(entry.word)
                     .font(.echoDisplay(15))
@@ -28,9 +29,9 @@ struct DictionaryEntryCard: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Spacer(minLength: 0)
-                starButton
                 editButton
                 deleteButton
+                starButton
             }
             annotation
         }

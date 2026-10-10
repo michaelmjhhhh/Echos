@@ -8,7 +8,10 @@ struct SnippetRow: View {
     let onDelete: () -> Void
 
     @State private var isHovering = false
-    @FocusState private var actionsFocused: Bool
+    @State private var isHoveringDelete = false
+    @State private var confirmingDelete = false
+    @FocusState private var editFocused: Bool
+    @FocusState private var deleteFocused: Bool
 
     var body: some View {
         HStack(spacing: Spacing.s) {
@@ -19,7 +22,7 @@ struct SnippetRow: View {
                 .padding(.horizontal, Spacing.xs)
                 .padding(.vertical, Spacing.xxs)
                 .background(
-                    RoundedRectangle(cornerRadius: Radius.control, style: .continuous)
+                    RoundedRectangle(cornerRadius: Radius.keycap, style: .continuous)
                         .fill(Color.echoCardHover)
                 )
                 .layoutPriority(1)
@@ -37,26 +40,38 @@ struct SnippetRow: View {
 
             Spacer(minLength: Spacing.xs)
 
-            HStack(spacing: Spacing.xxs) {
-                    Button(action: onEdit) {
-                        Image(systemName: "pencil")
-                            .font(.system(size: IconSize.small))
-                    }
-                    .buttonStyle(EchoPressButtonStyle())
-                    .help("Edit snippet")
-                    .accessibilityLabel("Edit \(snippet.trigger)")
-
-                    Button(action: onDelete) {
-                        Image(systemName: "trash")
-                            .font(.system(size: IconSize.small))
-                    }
-                    .buttonStyle(EchoPressButtonStyle())
-                    .help("Delete snippet")
-                    .accessibilityLabel("Delete \(snippet.trigger)")
+            // Same reveal rule as dictionary cards: hover or keyboard focus.
+            HStack(spacing: 7) {
+                Button(action: onEdit) {
+                    Image(systemName: "pencil")
+                        .font(.system(size: IconSize.small))
+                        .foregroundStyle(Color.echoSecondary)
                 }
-                .foregroundStyle(Color.echoSecondary)
-                .focused($actionsFocused)
-                .opacity(isHovering || actionsFocused ? 1 : 0.65)
+                .buttonStyle(EchoPressButtonStyle())
+                .focusable()
+                .focused($editFocused)
+                .echoFocusRing(editFocused, radius: Radius.keycap)
+                .help("Edit snippet")
+                .accessibilityLabel("Edit \(snippet.trigger)")
+
+                Button {
+                    confirmingDelete = true
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: IconSize.small))
+                        .foregroundStyle(isHoveringDelete || deleteFocused ? Color.echoWarning : Color.echoSecondary)
+                }
+                .buttonStyle(EchoPressButtonStyle())
+                .focusable()
+                .focused($deleteFocused)
+                .echoFocusRing(deleteFocused, radius: Radius.keycap)
+                .onHover { hovering in
+                    withAnimation(Motion.ease) { isHoveringDelete = hovering }
+                }
+                .help("Delete snippet")
+                .accessibilityLabel("Delete \(snippet.trigger)")
+            }
+            .opacity(isHovering || editFocused || deleteFocused ? 1 : 0)
         }
         .padding(.horizontal, Spacing.s)
         .padding(.vertical, Spacing.xs)
@@ -69,14 +84,21 @@ struct SnippetRow: View {
                 .strokeBorder(Color.echoHairline)
         )
         .contentShape(RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
-        .onTapGesture(count: 2, perform: onEdit)
+        // Single click edits, matching dictionary cards.
+        .onTapGesture(perform: onEdit)
         .onHover { hovering in
             withAnimation(Motion.ease) { isHovering = hovering }
         }
+        .help("Edit “\(snippet.trigger)”")
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Snippet \(snippet.trigger)")
         .accessibilityValue(snippet.expansion)
         .accessibilityAction(named: "Edit snippet", onEdit)
-        .accessibilityAction(named: "Delete snippet", onDelete)
+        .accessibilityAction(named: "Delete snippet") { confirmingDelete = true }
+        .confirmationDialog("Delete “\(snippet.trigger)”?", isPresented: $confirmingDelete) {
+            Button("Delete snippet", role: .destructive, action: onDelete)
+        } message: {
+            Text("Saying this phrase will no longer insert the saved text.")
+        }
     }
 }

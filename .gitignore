@@ -37,6 +37,7 @@ DerivedData/
 
 # ── Tooling and editors ───────────────────────────────────
 .worktrees/
+.pi-subagents/
 *~
 *.swp
 *.swo

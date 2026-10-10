@@ -21,16 +21,11 @@ struct InsightsView: View {
                     streakCard(snapshot)
                 }
                 .echoStagger(1, reduceMotion: reduceMotion)
-                VStack(alignment: .leading, spacing: Spacing.xs) {
-                    EyebrowText(text: "Results")
-                    Text("\(snapshot.totals.words.formatted()) recognized words · \(snapshot.totals.expandedWords.formatted()) output words after snippets")
-                        .font(.echo(12)).foregroundStyle(Color.echoText)
-                    Text("\(snapshot.outcomes["pasteDispatched", default: 0]) paste requests · \(snapshot.outcomes["copied", default: 0]) copied · \(snapshot.outcomes["awaitingCopy", default: 0]) awaiting copy · \(snapshot.outcomes["cancelled", default: 0]) cancelled")
-                        .font(.echo(11)).foregroundStyle(Color.echoSecondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading).echoCard()
+                resultsCard(snapshot)
+                    .echoStagger(2, reduceMotion: reduceMotion)
                 Text("Words count recognized speech before snippet expansion. A paste request does not confirm that text appeared in another app. Older records may include expanded text.")
                     .font(.echo(11)).foregroundStyle(Color.echoSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
                 if let error = usage.persistenceError {
                     Text(error).font(.echo(11)).foregroundStyle(Color.echoWarning)
                 }
@@ -54,17 +49,25 @@ struct InsightsView: View {
         .echoCard()
     }
 
+    /// Number and caption sit at the same heights as the two sibling cards;
+    /// the gauge rides at the trailing edge instead of pushing the number down.
     private func wpmCard(_ wpm: Int) -> some View {
         statCard(eyebrow: "Words per minute") {
-            HStack(alignment: .center, spacing: Spacing.s) {
-                WPMGauge(value: wpm, reduceMotion: reduceMotion)
-                Text("\(wpm)")
-                    .font(.echoDisplay(30))
-                    .tracking(-0.6)
-                    .foregroundStyle(Color.echoText)
-                    .monospacedDigit()
-                    .contentTransition(.numericText())
-                    .animation(reduceMotion ? nil : Motion.spring, value: wpm)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .bottom) {
+                    Text("\(wpm)")
+                        .font(.echoDisplay(30))
+                        .tracking(-0.6)
+                        .foregroundStyle(Color.echoText)
+                        .monospacedDigit()
+                        .contentTransition(.numericText())
+                        .animation(reduceMotion ? nil : Motion.spring, value: wpm)
+                    Spacer(minLength: Spacing.xs)
+                    WPMGauge(value: wpm, reduceMotion: reduceMotion)
+                }
+                Text("Last 30 days")
+                    .font(.echoMono(10))
+                    .foregroundStyle(Color.echoSecondary)
             }
         }
     }
@@ -102,7 +105,7 @@ struct InsightsView: View {
                     .monospacedDigit()
                     .contentTransition(.numericText())
                     .animation(reduceMotion ? nil : Motion.spring, value: totals.dictations)
-                Text(totals.activeDays == 1 ? "1 active day" : "\(totals.activeDays) active days")
+                Text(echoCount(totals.activeDays, "active day"))
                     .font(.echoMono(10))
                     .foregroundStyle(Color.echoSecondary)
             }
@@ -144,15 +147,17 @@ struct InsightsView: View {
         let activeDays = recentDaily.values.filter { $0 > 0 }.count
         return VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
-                Text(snapshot.currentStreak == 1 ? "1 day streak" : "\(snapshot.currentStreak) day streak")
+                Text("\(snapshot.currentStreak) day streak")
                     .font(.echoDisplay(16))
                     .tracking(-0.2)
                     .foregroundStyle(Color.echoText)
                 Spacer()
-                EyebrowText(text: "Longest | \(snapshot.longestStreak)")
+                Text("Longest \(echoCount(snapshot.longestStreak, "day"))")
+                    .font(.echoMono(10))
+                    .foregroundStyle(Color.echoSecondary)
             }
             Spacer(minLength: 0)
-            StreakHeatmap(daily: recentDaily)
+            StreakHeatmap(daily: snapshot.daily)
                 // 126 individual cells are VoiceOver noise — one summary instead.
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("Dictation activity calendar")
@@ -161,22 +166,62 @@ struct InsightsView: View {
                 )
             Spacer(minLength: 0)
             HStack(spacing: 5) {
-                Text("LESS")
-                    .font(.echoMono(8))
+                Text("Less")
+                    .font(.echoMono(9))
                     .foregroundStyle(Color.echoSecondary)
                 ForEach([0.15, 0.4, 0.7, 1.0], id: \.self) { opacity in
                     RoundedRectangle(cornerRadius: 2, style: .continuous)
                         .fill(Color.echoAccent.opacity(opacity))
                         .frame(width: 8, height: 8)
                 }
-                Text("MORE")
-                    .font(.echoMono(8))
+                Text("More")
+                    .font(.echoMono(9))
                     .foregroundStyle(Color.echoSecondary)
             }
             .accessibilityHidden(true)
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .frame(height: detailCardHeight)
+        .echoCard()
+    }
+
+    // MARK: - Row 3
+
+    /// Label/value pairs in two columns instead of one dot-joined sentence,
+    /// so each number can be found at a glance.
+    private func resultsCard(_ snapshot: UsageSnapshot) -> some View {
+        let rows: [(label: String, value: Int)] = [
+            ("Recognized words", snapshot.totals.words),
+            ("Output words after snippets", snapshot.totals.expandedWords),
+            ("Paste requests", snapshot.outcomes["pasteDispatched", default: 0]),
+            ("Copied", snapshot.outcomes["copied", default: 0]),
+            ("Awaiting copy", snapshot.outcomes["awaitingCopy", default: 0]),
+            ("Cancelled", snapshot.outcomes["cancelled", default: 0]),
+        ]
+        return VStack(alignment: .leading, spacing: Spacing.s) {
+            EyebrowText(text: "Results")
+            LazyVGrid(
+                columns: [GridItem(.flexible(), spacing: Spacing.xl), GridItem(.flexible())],
+                alignment: .leading,
+                spacing: Spacing.xs
+            ) {
+                ForEach(rows, id: \.label) { row in
+                    HStack(spacing: Spacing.xs) {
+                        Text(row.label)
+                            .font(.echo(12))
+                            .foregroundStyle(Color.echoSecondary)
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
+                        Text(row.value.formatted())
+                            .font(.echoMono(12, medium: true))
+                            .foregroundStyle(Color.echoText)
+                            .monospacedDigit()
+                    }
+                    .accessibilityElement(children: .combine)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .echoCard()
     }
 }
@@ -243,7 +288,7 @@ private struct AppUsageBar: View {
                 .font(.echo(12, .medium))
                 .foregroundStyle(Color.echoText)
                 .lineLimit(1)
-                .frame(width: 88, alignment: .leading)
+                .frame(width: 116, alignment: .leading)
             GeometryReader { geometry in
                 RoundedRectangle(cornerRadius: 3, style: .continuous)
                     .fill(Color.echoAccent.opacity(0.25 + 0.75 * fraction))
@@ -265,19 +310,30 @@ private struct AppUsageBar: View {
 }
 
 /// GitHub-style calendar: columns are weeks (oldest → newest), rows Sun–Sat,
-/// intensity in four cyan steps. Month labels are positioned absolutely so
-/// they never truncate.
+/// intensity in four cyan steps. As many weeks as fit the card's width are
+/// shown, so the grid never leaves a dead strip on the right. Month labels
+/// are positioned absolutely so they never truncate.
 private struct StreakHeatmap: View {
     let daily: [Date: Int]
 
     private let calendar = Calendar.current
-    private let weekCount = 18
     private let cellSize: CGFloat = 9
     private let cellGap: CGFloat = 3
+    private let labelHeight: CGFloat = 10
+    private let labelGap: CGFloat = 5
 
     private var columnStride: CGFloat { cellSize + cellGap }
+    private var gridHeight: CGFloat { labelHeight + labelGap + 7 * cellSize + 6 * cellGap }
 
-    private var weeks: [[Date?]] {
+    var body: some View {
+        GeometryReader { geometry in
+            let weekCount = max(1, Int((geometry.size.width + cellGap) / columnStride))
+            grid(weeks: weeks(count: weekCount))
+        }
+        .frame(height: gridHeight)
+    }
+
+    private func weeks(count weekCount: Int) -> [[Date?]] {
         let today = calendar.startOfDay(for: Date())
         let weekday = calendar.component(.weekday, from: today) // 1 = Sunday
         guard let thisWeekStart = calendar.date(byAdding: .day, value: -(weekday - 1), to: today) else { return [] }
@@ -294,16 +350,13 @@ private struct StreakHeatmap: View {
         }
     }
 
-    private var maxWords: Int {
-        max(daily.values.max() ?? 1, 1)
-    }
-
-    var body: some View {
-        let columns = weeks
-        VStack(alignment: .leading, spacing: 5) {
+    private func grid(weeks columns: [[Date?]]) -> some View {
+        // Intensity is relative to the busiest day on screen, not all history.
+        let maxWords = max(columns.joined().compactMap { $0.flatMap { daily[$0] } }.max() ?? 1, 1)
+        return VStack(alignment: .leading, spacing: labelGap) {
             // Month labels, absolutely positioned at their column's x offset.
             ZStack(alignment: .topLeading) {
-                Color.clear.frame(height: 10)
+                Color.clear.frame(height: labelHeight)
                 ForEach(columns.indices, id: \.self) { columnIndex in
                     if let label = monthLabel(for: columns[columnIndex]) {
                         Text(label)
@@ -318,7 +371,7 @@ private struct StreakHeatmap: View {
                 ForEach(columns.indices, id: \.self) { columnIndex in
                     VStack(spacing: cellGap) {
                         ForEach(0..<7, id: \.self) { rowIndex in
-                            cell(for: columns[columnIndex][rowIndex])
+                            cell(for: columns[columnIndex][rowIndex], maxWords: maxWords)
                         }
                     }
                 }
@@ -335,7 +388,7 @@ private struct StreakHeatmap: View {
     }
 
     @ViewBuilder
-    private func cell(for day: Date?) -> some View {
+    private func cell(for day: Date?, maxWords: Int) -> some View {
         let shape = RoundedRectangle(cornerRadius: 2, style: .continuous)
         if let day {
             let words = daily[day] ?? 0
@@ -349,7 +402,7 @@ private struct StreakHeatmap: View {
                 shape
                     .fill(Color.echoAccent.opacity(opacity))
                     .frame(width: cellSize, height: cellSize)
-                    .help("\(words.formatted()) words · \(day.formatted(date: .abbreviated, time: .omitted))")
+                    .help("\(echoCount(words, "word")) · \(day.formatted(date: .abbreviated, time: .omitted))")
             }
         } else {
             shape

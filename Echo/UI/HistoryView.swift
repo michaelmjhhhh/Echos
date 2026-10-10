@@ -14,9 +14,38 @@ struct HistoryView: View {
         return transcripts.entries.filter { $0.text.localizedCaseInsensitiveContains(query) }
     }
 
+    /// Filtered entries split by calendar day, newest first. Each row keeps
+    /// its overall position so the entrance stagger runs top to bottom.
+    private var dayGroups: [(day: Date, title: String, entries: [(index: Int, entry: TranscriptEntry)])] {
+        let calendar = Calendar.current
+        var groups: [(day: Date, title: String, entries: [(index: Int, entry: TranscriptEntry)])] = []
+        for (index, entry) in filtered.enumerated() {
+            let day = calendar.startOfDay(for: entry.date)
+            if groups.last?.day == day {
+                groups[groups.count - 1].entries.append((index, entry))
+            } else {
+                groups.append((day, dayTitle(day, calendar: calendar), [(index, entry)]))
+            }
+        }
+        return groups
+    }
+
+    private func dayTitle(_ day: Date, calendar: Calendar) -> String {
+        if calendar.isDateInToday(day) { return "Today" }
+        if calendar.isDateInYesterday(day) { return "Yesterday" }
+        if calendar.isDate(day, equalTo: Date(), toGranularity: .year) {
+            return day.formatted(.dateTime.weekday(.wide).month(.abbreviated).day())
+        }
+        return day.formatted(date: .abbreviated, time: .omitted)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             header
+            if !transcripts.entries.isEmpty {
+                EyebrowText(text: echoCount(transcripts.entries.count, "transcript"))
+                    .monospacedDigit()
+            }
             PersistenceStatusView(error: transcripts.persistenceError, isSaving: transcripts.isSaving,
                 recoveryAvailable: transcripts.recoveryAvailable,
                 retry: { Task { _ = await transcripts.retrySave() } },
@@ -27,10 +56,15 @@ struct HistoryView: View {
                 emptyState
             } else {
                 ScrollView {
-                    LazyVStack(spacing: Spacing.xs) {
-                        ForEach(Array(filtered.enumerated()), id: \.element.id) { index, entry in
-                            TranscriptRow(entry: entry)
-                                .echoStagger(index, reduceMotion: reduceMotion)
+                    LazyVStack(alignment: .leading, spacing: Spacing.xs) {
+                        ForEach(Array(dayGroups.enumerated()), id: \.element.day) { groupIndex, group in
+                            EyebrowText(text: group.title)
+                                .padding(.top, groupIndex == 0 ? 0 : Spacing.s)
+                                .accessibilityAddTraits(.isHeader)
+                            ForEach(group.entries, id: \.entry.id) { item in
+                                TranscriptRow(entry: item.entry)
+                                    .echoStagger(item.index, reduceMotion: reduceMotion)
+                            }
                         }
                     }
                     .padding(.bottom, Spacing.m)
@@ -54,50 +88,24 @@ struct HistoryView: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            HStack(spacing: 7) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: IconSize.small))
-                    .foregroundStyle(Color.echoSecondary)
-                    .accessibilityHidden(true)
-                TextField("Search transcripts", text: $query)
-                    .textFieldStyle(.plain)
-                    .font(.echo(13))
-                    .foregroundStyle(Color.echoText)
-                    .focused($searchFocused)
-                    .onExitCommand {
-                        // Escape clears the query first, then releases focus.
-                        if query.isEmpty {
-                            searchFocused = false
-                        } else {
-                            query = ""
-                        }
-                    }
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(RoundedRectangle(cornerRadius: Radius.control, style: .continuous).fill(Color.echoCard))
-            .overlay(RoundedRectangle(cornerRadius: Radius.control, style: .continuous).strokeBorder(Color.echoHairline))
-            .echoFocusRing(searchFocused)
+            EchoSearchField(
+                prompt: "Search transcripts",
+                text: $query,
+                focus: $searchFocused,
+                matchCount: query.isEmpty ? nil : filtered.count
+            )
             .help("Search transcripts (⌘F)")
-
-            if !query.isEmpty {
-                Text(filtered.count == 1 ? "1 match" : "\(filtered.count) matches")
-                    .font(.echoMono(10, medium: true))
-                    .tracking(0.7)
-                    .foregroundStyle(Color.echoSecondary)
-                    .monospacedDigit()
-            }
 
             Spacer()
 
             if !transcripts.entries.isEmpty {
-                Button("Clear History") { confirmingClear = true }
+                Button("Clear history") { confirmingClear = true }
                     .buttonStyle(EchoSecondaryButtonStyle(destructive: true))
                     .confirmationDialog(
                         "Delete all \(transcripts.entries.count) transcripts?",
                         isPresented: $confirmingClear
                     ) {
-                        Button("Delete All", role: .destructive) { Task { _ = await transcripts.clearPersisted() } }
+                        Button("Delete all", role: .destructive) { Task { _ = await transcripts.clearPersisted() } }
                     } message: {
                         Text("This deletes saved transcripts on this Mac. Usage statistics are managed separately in Settings.")
                     }
@@ -126,7 +134,7 @@ struct HistoryView: View {
                 EchoEmptyState(icon: "magnifyingglass") {
                     Text("No transcripts match “\(query)”.")
                 } actions: {
-                    Button("Clear Search") {
+                    Button("Clear search") {
                         query = ""
                         searchFocused = true
                     }

@@ -17,6 +17,13 @@ struct TranscriptRow: View {
     @State private var copyFailed = false
     @State private var addingToDictionary = false
     @FocusState private var copyFocused: Bool
+    @FocusState private var openFocused: Bool
+
+    /// Actions show on hover, on keyboard focus, and while copy feedback is
+    /// on screen — never hidden from keyboard users.
+    private var showsActions: Bool {
+        isHovering || copyFocused || openFocused || justCopied || copyFailed
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: Spacing.s) {
@@ -30,19 +37,17 @@ struct TranscriptRow: View {
                 HStack(spacing: Spacing.xs) {
                     Text(entry.date.formatted(.relative(presentation: .named)))
                     Text("·")
-                    Text("\(entry.wordCount) words")
+                    Text(echoCount(entry.wordCount, "word"))
                 }
                 .font(.echoMono(11))
                 .foregroundStyle(Color.echoSecondary)
             }
             Spacer(minLength: 0)
-            // Visible on hover, when keyboard focus lands on it, and while
-            // confirming — never hidden from keyboard users.
-            VStack(alignment: .trailing, spacing: Spacing.xs) {
+            HStack(spacing: Spacing.s) {
                 copyButton
-                Button("Open") { showingDetail = true }.buttonStyle(EchoPressButtonStyle()).font(.echo(11))
-                    .accessibilityLabel("Open full transcript")
+                openButton
             }
+            .opacity(showsActions ? 1 : 0)
         }
         .padding(Spacing.s)
         .background(
@@ -83,7 +88,7 @@ struct TranscriptRow: View {
         .onDisappear { copyFeedbackTask?.cancel() }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(entry.text)
-        .accessibilityValue("\(entry.date.formatted(.relative(presentation: .named))), \(entry.wordCount) words")
+        .accessibilityValue("\(entry.date.formatted(.relative(presentation: .named))), \(echoCount(entry.wordCount, "word"))")
         .accessibilityAction(named: "Copy") { copy() }
         .accessibilityAction(named: "Correct a word") { addingToDictionary = true }
         .accessibilityAction(named: "Open full transcript") { showingDetail = true }
@@ -104,6 +109,22 @@ struct TranscriptRow: View {
         .foregroundStyle(copyFailed ? Color.echoWarning : (justCopied ? Color.echoAccent : Color.echoSecondary))
         .accessibilityLabel("Copy transcript")
         .help("Copy transcript to the clipboard")
+    }
+
+    private var openButton: some View {
+        Button {
+            showingDetail = true
+        } label: {
+            Label("Open", systemImage: "arrow.up.left.and.arrow.down.right")
+                .font(.echo(11, .medium))
+        }
+        .buttonStyle(EchoPressButtonStyle())
+        .focusable()
+        .focused($openFocused)
+        .echoFocusRing(openFocused, radius: Radius.keycap)
+        .foregroundStyle(Color.echoSecondary)
+        .accessibilityLabel("Open full transcript")
+        .help("Show the full transcript")
     }
 
     private func copy() {
