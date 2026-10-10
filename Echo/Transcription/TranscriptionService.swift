@@ -23,6 +23,7 @@ final class TranscriptionService: Transcribing {
         let budget: Int
     }
     private var promptCache: (key: PromptKey, tokens: [Int])?
+    private var nonSpeechTokens: [Int] = []
 
     init(modelVariant: String, downloadBase: URL? = nil) {
         self.modelVariant = modelVariant
@@ -69,7 +70,8 @@ final class TranscriptionService: Transcribing {
                 load: false,
                 download: false
             ))
-            kit.tokenizer = try LocalWhisperTokenizer(tokenizer: tokenizer)
+            let whisperTokenizer = try LocalWhisperTokenizer(tokenizer: tokenizer)
+            kit.tokenizer = whisperTokenizer
             try await kit.loadModels()
             if let logitsSize = kit.textDecoder.logitsSize {
                 (kit.textDecoder as? TextDecoder)?.isModelMultilingual = logitsSize != 51_864
@@ -89,6 +91,7 @@ final class TranscriptionService: Transcribing {
             try Task.checkCancellation()
             whisperKit = kit
             promptCache = nil
+            nonSpeechTokens = Self.nonSpeechTokens(whisperTokenizer)
             await gate.release()
         } catch {
             whisperKit = nil
@@ -135,7 +138,11 @@ final class TranscriptionService: Transcribing {
             // Preserve WhisperKit's one-second synthetic-tail safeguard. The
             // adapter appends that second below so real final words are eligible
             // even when they fall just after a 30-second window boundary.
-            windowClipTime: 1, concurrentWorkerCount: 1
+            windowClipTime: 1,
+            // OpenAI's decoder defaults; WhisperKit 0.18 leaves both off. They stop
+            // sound-event captions and an empty first token on quiet audio.
+            suppressBlank: true, supressTokens: nonSpeechTokens,
+            concurrentWorkerCount: 1
         )
         let promptStart = ProcessInfo.processInfo.systemUptime
         let key = PromptKey(vocabulary: request.vocabulary, language: language, budget: min(200, max(0, request.promptTokenBudget)))
@@ -187,6 +194,21 @@ final class TranscriptionService: Transcribing {
             text: results.map(\.text).joined(separator: " "), language: results.first?.language ?? language,
             diagnostics: diagnostics, needsReview: needsReview
         )
+    }
+
+    /// Whisper captions sound events as "(music)", "[BLANK_AUDIO]", "*sigh*" or "♪".
+    /// Suppress the single tokens that open them, as OpenAI's decoder does by
+    /// default. Punctuation people dictate (colon, slash, @, #) stays allowed.
+    private static func nonSpeechTokens(_ tokenizer: WhisperTokenizer) -> [Int] {
+        let symbols = ["(", "[", "{", "*", "((", "[[", "{{", "(((", "-(", "-[", "('", "(\"", "♪", "♪♪", "♪♪♪", "♩", "♫", "♬"]
+        var tokens = Set<Int>()
+        for symbol in symbols {
+            for text in [symbol, " " + symbol] {
+                let encoded = tokenizer.encode(text: text).filter { $0 < tokenizer.specialTokens.specialTokenBegin }
+                if encoded.count == 1 { tokens.insert(encoded[0]) }
+            }
+        }
+        return tokens.sorted()
     }
 }
 
