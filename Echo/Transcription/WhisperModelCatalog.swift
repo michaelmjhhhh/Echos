@@ -55,6 +55,13 @@ enum WhisperModelCatalog {
         models.first { $0.variant == variant }
     }
 
+    /// Previous-transcript context helped Tiny in replay. Distil Large v3 gained
+    /// nothing and returned empty text for most clips when the context had no
+    /// dictionary words with it. Other models stay off until measured.
+    static func supportsRecentContext(_ variant: String) -> Bool {
+        variant == "openai_whisper-tiny.en"
+    }
+
     /// Distil Large v3 uses a multilingual tokenizer but is trained for English.
     /// Tokenizer capacity alone must not advertise multilingual recognition.
     static func supportsMultilingual(_ variant: String) -> Bool {

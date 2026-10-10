@@ -433,7 +433,8 @@ final class DictationController: ObservableObject {
             : "en"
         let app = NSWorkspace.shared.frontmostApplication
         var context = ""
-        if settings.useRecentContext, let recentContext, recentContext.bundleID == app?.bundleIdentifier,
+        if settings.useRecentContext, WhisperModelCatalog.supportsRecentContext(settings.modelVariant),
+           let recentContext, recentContext.bundleID == app?.bundleIdentifier,
            recentContext.at.duration(to: started) < Self.recentContextLifetime {
             context = recentContext.text
         }

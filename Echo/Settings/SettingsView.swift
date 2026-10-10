@@ -219,7 +219,7 @@ struct SettingsView: View {
             labeledRow("Use recent dictation as context") {
                 Toggle("Use recent dictation as context", isOn: $settings.useRecentContext).labelsHidden().toggleStyle(.switch).controlSize(.small)
             }
-            footnote("Your previous transcript in the same app, from the last five minutes, helps recognize names and terms you just used. It stays in memory and is never saved.")
+            footnote("Your previous transcript in the same app, from the last five minutes, helps recognize names and terms you just used. It stays in memory and is never saved. Used with Tiny (English) only; other models have not shown a gain.")
             hairline
             labeledRow("Expand spoken snippets") {
                 Toggle("Expand spoken snippets", isOn: $settings.expandSnippets).labelsHidden().toggleStyle(.switch).controlSize(.small)
