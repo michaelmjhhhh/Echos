@@ -68,27 +68,43 @@ struct HomeView: View {
             if let notice = controller.deliveryNotice {
                 Text(notice).font(.echo(12)).foregroundStyle(Color.echoSecondary).multilineTextAlignment(.center)
             }
-            HStack(spacing: Spacing.s) {
-                if controller.canCancel {
-                    Button(controller.isCancelling ? "Cancelling…" : "Cancel dictation") { controller.cancelDictation() }
-                        .buttonStyle(EchoSecondaryButtonStyle())
-                        .disabled(controller.isCancelling)
-                }
-                if controller.canRetry {
-                    Button("Retry setup") { Task { await controller.retrySetup() } }.buttonStyle(EchoSecondaryButtonStyle())
-                }
-                if case .error = controller.state {
-                    Button("Open settings") { section = .settings }.buttonStyle(EchoSecondaryButtonStyle())
-                }
-                if case .copyReady = controller.state {
-                    Button("Copy transcript") { controller.copyTranscript() }.buttonStyle(EchoPrimaryButtonStyle())
-                }
+            // Only lay out the actions row when it has a button; an empty row
+            // still takes stack spacing and pushes the hero off-center.
+            if hasHeroActions {
+                heroActions
             }
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, Spacing.xl)
         .echoCard(padding: Spacing.l)
         .animation(reduceMotion ? nil : Motion.spring, value: controller.state)
+    }
+
+    private var hasHeroActions: Bool {
+        if controller.canCancel || controller.canRetry { return true }
+        switch controller.state {
+        case .error, .copyReady: return true
+        default: return false
+        }
+    }
+
+    private var heroActions: some View {
+        HStack(spacing: Spacing.s) {
+            if controller.canCancel {
+                Button(controller.isCancelling ? "Cancelling…" : "Cancel dictation") { controller.cancelDictation() }
+                    .buttonStyle(EchoSecondaryButtonStyle())
+                    .disabled(controller.isCancelling)
+            }
+            if controller.canRetry {
+                Button("Retry setup") { Task { await controller.retrySetup() } }.buttonStyle(EchoSecondaryButtonStyle())
+            }
+            if case .error = controller.state {
+                Button("Open settings") { section = .settings }.buttonStyle(EchoSecondaryButtonStyle())
+            }
+            if case .copyReady = controller.state {
+                Button("Copy transcript") { controller.copyTranscript() }.buttonStyle(EchoPrimaryButtonStyle())
+            }
+        }
     }
 
     private var isLive: Bool {
@@ -133,12 +149,14 @@ struct HomeView: View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             EyebrowText(text: "Today")
             HStack(alignment: .firstTextBaseline, spacing: 5) {
-                Text("\(usage.snapshot.todayWords)")
-                    .font(.echoMono(15, medium: true))
+                // Same face as the sibling cards' values so the row reads as one line.
+                Text(usage.snapshot.todayWords.formatted())
+                    .font(.echo(15, .medium))
                     .foregroundStyle(Color.echoText)
+                    .monospacedDigit()
                     .contentTransition(.numericText())
                     .animation(reduceMotion ? nil : Motion.spring, value: usage.snapshot.todayWords)
-                Text("words · \(usage.snapshot.todayDictations) dictations")
+                Text("\(usage.snapshot.todayWords == 1 ? "word" : "words") · \(echoCount(usage.snapshot.todayDictations, "dictation"))")
                     .font(.echo(12))
                     .foregroundStyle(Color.echoSecondary)
             }

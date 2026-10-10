@@ -76,39 +76,13 @@ struct SnippetsView: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            HStack(spacing: 7) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: IconSize.small))
-                    .foregroundStyle(Color.echoSecondary)
-                    .accessibilityHidden(true)
-                TextField("Search snippets", text: $query)
-                    .textFieldStyle(.plain)
-                    .font(.echo(13))
-                    .foregroundStyle(Color.echoText)
-                    .focused($searchFocused)
-                    .onExitCommand {
-                        // Escape clears the query first, then releases focus.
-                        if query.isEmpty {
-                            searchFocused = false
-                        } else {
-                            query = ""
-                        }
-                    }
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(RoundedRectangle(cornerRadius: Radius.control, style: .continuous).fill(Color.echoCard))
-            .overlay(RoundedRectangle(cornerRadius: Radius.control, style: .continuous).strokeBorder(Color.echoHairline))
-            .echoFocusRing(searchFocused)
+            EchoSearchField(
+                prompt: "Search snippets",
+                text: $query,
+                focus: $searchFocused,
+                matchCount: query.isEmpty ? nil : filtered.count
+            )
             .help("Search snippets (⌘F)")
-
-            if !query.isEmpty {
-                Text(filtered.count == 1 ? "1 match" : "\(filtered.count) matches")
-                    .font(.echoMono(10, medium: true))
-                    .tracking(0.7)
-                    .foregroundStyle(Color.echoSecondary)
-                    .monospacedDigit()
-            }
 
             Spacer()
 
@@ -119,9 +93,9 @@ struct SnippetsView: View {
     }
 
     private var statLine: some View {
-        EyebrowText(text: snippets.entries.count == 1 ? "1 snippet" : "\(snippets.entries.count) snippets")
+        EyebrowText(text: echoCount(snippets.entries.count, "snippet"))
             .monospacedDigit()
-            .accessibilityLabel("\(snippets.entries.count) snippets")
+            .accessibilityLabel(echoCount(snippets.entries.count, "snippet"))
     }
 
     // MARK: - Empty states
@@ -146,7 +120,7 @@ struct SnippetsView: View {
             EchoEmptyState(icon: "magnifyingglass") {
                 Text("No snippets match “\(query)”.")
             } actions: {
-                Button("Clear Search") {
+                Button("Clear search") {
                     query = ""
                     searchFocused = true
                 }

@@ -6,6 +6,12 @@ All user-facing and engineering changes are recorded here. Model weights are unc
 
 ### Changed
 
+- Polish every main-window page within the existing design system. Transcript rows show Copy and Open side by side and reveal them on hover or keyboard focus. History groups transcripts by day and shows a total count. The Home hero no longer reserves space for an empty actions row. Insights shows the words-per-minute window (last 30 days), lists result counts as label/value pairs, widens app names before truncating, and sizes the activity calendar to the card width. Settings controls share one right edge.
+- History, Dictionary and Snippets share one search field with an inline match count and a clear button.
+- The Dictionary sort menu uses the same text color as the buttons beside it, and a starred word's star sits at the card's trailing edge.
+- Snippet rows open the editor on a single click, as dictionary cards do, and deleting a snippet now asks for confirmation.
+- Counts use singular nouns for one item, for example "1 word" instead of "1 words".
+
 - Ignore `.pi-subagents/` and stop tracking its generated subagent artifacts.
 - Add `skills-lock.json`, which pins the `code-review` and `codebase-design` agent skills by source and hash.
 - `AGENTS.md` now forbids adding the agent as a commit co-author.

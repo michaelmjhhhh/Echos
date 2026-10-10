@@ -338,6 +338,68 @@ struct KeycapView: View {
     }
 }
 
+/// "1 word", "2 words" — a count in copy always agrees with its noun.
+func echoCount(_ n: Int, _ noun: String, plural: String? = nil) -> String {
+    "\(n.formatted()) \(n == 1 ? noun : (plural ?? noun + "s"))"
+}
+
+/// The one search field used by History, Dictionary and Snippets. Escape
+/// clears the query first, then releases focus; the match count and a clear
+/// button appear inside the field while a query is active.
+struct EchoSearchField: View {
+    let prompt: String
+    @Binding var text: String
+    let focus: FocusState<Bool>.Binding
+    /// Results for the current query; nil hides the count.
+    var matchCount: Int?
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: IconSize.small))
+                .foregroundStyle(Color.echoSecondary)
+                .accessibilityHidden(true)
+            TextField(prompt, text: $text)
+                .textFieldStyle(.plain)
+                .font(.echo(13))
+                .foregroundStyle(Color.echoText)
+                .focused(focus)
+                .onExitCommand {
+                    if text.isEmpty {
+                        focus.wrappedValue = false
+                    } else {
+                        text = ""
+                    }
+                }
+            if !text.isEmpty {
+                if let matchCount {
+                    Text(echoCount(matchCount, "match", plural: "matches"))
+                        .font(.echoMono(11))
+                        .foregroundStyle(Color.echoSecondary)
+                        .monospacedDigit()
+                        .fixedSize()
+                }
+                Button {
+                    text = ""
+                    focus.wrappedValue = true
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: IconSize.small))
+                        .foregroundStyle(Color.echoSecondary)
+                }
+                .buttonStyle(EchoPressButtonStyle())
+                .help("Clear search")
+                .accessibilityLabel("Clear search")
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(RoundedRectangle(cornerRadius: Radius.control, style: .continuous).fill(Color.echoCard))
+        .overlay(RoundedRectangle(cornerRadius: Radius.control, style: .continuous).strokeBorder(Color.echoHairline))
+        .echoFocusRing(focus.wrappedValue)
+    }
+}
+
 /// Small mono eyebrow label above card content — IBM Plex Mono, wide tracking.
 struct EyebrowText: View {
     let text: String
