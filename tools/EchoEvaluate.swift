@@ -123,7 +123,8 @@ struct EchoEvaluate {
                             ))
                             let asrSeconds = ProcessInfo.processInfo.systemUptime - asrStart
                             let processStart = ProcessInfo.processInfo.systemUptime
-                            let finalText = processors.reduce(output.text) { $1.process($0) }
+                            let dropped = SilenceHallucination.shouldDrop(output.text, trimReason: selected.fallbackReason)
+                            let finalText = processors.reduce(dropped ? "" : output.text) { $1.process($0) }
                             let processingSeconds = ProcessInfo.processInfo.systemUptime - processStart
                             let releaseSeconds = ProcessInfo.processInfo.systemUptime - releaseStart
                             let diagnostics = output.diagnostics
@@ -149,7 +150,9 @@ struct EchoEvaluate {
                                 "rawCER": score(characters(item.reference), characters(output.text)),
                                 "falseInsertion": item.reference.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !output.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                                 "falseRejection": !item.reference.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && output.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                                "rawCharacterCount": output.text.count, "finalCharacterCount": finalText.count
+                                "rawCharacterCount": output.text.count, "finalCharacterCount": finalText.count,
+                                "silenceHallucinationDropped": dropped,
+                                "finalFalseInsertion": item.reference.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !finalText.isEmpty
                             ]
                             if let language = output.language { row["detectedLanguage"] = language }
                             if let value = diagnostics.averageLogProbability, value.isFinite { row["averageLogProbability"] = value }

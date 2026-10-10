@@ -614,6 +614,7 @@ final class DictationController: ObservableObject {
             let output = try await transcriber.transcribe(trimmed.samples, request: session.request)
             guard activeSession?.id == session.id, !Task.isCancelled else { return }
             var text = output.text
+            if SilenceHallucination.shouldDrop(text, trimReason: trimmed.fallbackReason) { text = "" }
             let recognizedWords = TextWordCounter.count(text, language: output.language)
             let transcriptionDuration = transcriptionStarted.duration(to: .now).timeInterval
             let processingStarted = ContinuousClock.now
