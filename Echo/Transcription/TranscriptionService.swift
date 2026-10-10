@@ -148,22 +148,35 @@ final class TranscriptionService: Transcribing {
             suppressBlank: true, supressTokens: nonSpeechTokens,
             concurrentWorkerCount: 1
         )
+        let chunks = SpeechChunker.chunks(samples)
         let promptStart = ProcessInfo.processInfo.systemUptime
+        // Later chunks always receive the previous chunk as context, so long
+        // recordings reserve its share of the prompt from the first chunk on.
+        let reservesContext = !request.context.isEmpty || chunks.count > 1
         let budget = min(200, max(0, request.promptTokenBudget))
         let glossary = glossaryTokens(
             for: request.vocabulary, language: language,
-            budget: request.context.isEmpty ? budget : min(budget, 200 - Self.contextTokenLimit),
+            budget: reservesContext ? min(budget, 200 - Self.contextTokenLimit) : budget,
             tokenizer: whisperKit.tokenizer, diagnostics: &diagnostics
         )
-        let tokens = glossary + contextTokens(for: request.context, tokenizer: whisperKit.tokenizer)
         diagnostics.promptDuration = ProcessInfo.processInfo.systemUptime - promptStart
-        diagnostics.promptTokenCount = tokens.count
-        options.promptTokens = tokens.isEmpty ? nil : tokens
-        var input = samples
-        input.append(contentsOf: repeatElement(0, count: Int(options.windowClipTime * 16_000)))
+        var context = request.context
+        var results: [TranscriptionResult] = []
         let decodeStart = ProcessInfo.processInfo.systemUptime
-        let results = try await whisperKit.transcribe(audioArray: input, decodeOptions: options)
-        try Task.checkCancellation()
+        for range in chunks {
+            let promptStart = ProcessInfo.processInfo.systemUptime
+            let tokens = glossary + contextTokens(for: context, tokenizer: whisperKit.tokenizer)
+            diagnostics.promptDuration += ProcessInfo.processInfo.systemUptime - promptStart
+            diagnostics.promptTokenCount = max(diagnostics.promptTokenCount, tokens.count)
+            options.promptTokens = tokens.isEmpty ? nil : tokens
+            var input = Array(samples[range])
+            input.append(contentsOf: repeatElement(0, count: Int(options.windowClipTime * 16_000)))
+            let chunkResults = try await whisperKit.transcribe(audioArray: input, decodeOptions: options)
+            try Task.checkCancellation()
+            results += chunkResults
+            let text = chunkResults.map(\.text).joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !text.isEmpty { context = String((context + " " + text).suffix(1_000)) }
+        }
         diagnostics.inferenceDuration = ProcessInfo.processInfo.systemUptime - decodeStart
         let segments = results.flatMap(\.segments)
         for result in results {

@@ -49,6 +49,7 @@ targets:
     sources:
       - tools/EchoEvaluate.swift
       - Echo/Transcription/TranscriptionService.swift
+      - Echo/Transcription/SpeechChunker.swift
       - Echo/Transcription/TranscriptionResult.swift
       - Echo/Transcription/WhisperModelCatalog.swift
       - Echo/Transcription/ModelAcquisition.swift
