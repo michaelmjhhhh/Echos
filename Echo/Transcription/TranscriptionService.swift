@@ -165,9 +165,9 @@ final class TranscriptionService: Transcribing {
         var results: [TranscriptionResult] = []
         let decodeStart = ProcessInfo.processInfo.systemUptime
         for range in chunks {
-            let promptStart = ProcessInfo.processInfo.systemUptime
+            let contextStart = ProcessInfo.processInfo.systemUptime
             let tokens = glossary + contextTokens(for: context, tokenizer: whisperKit.tokenizer)
-            diagnostics.promptDuration += ProcessInfo.processInfo.systemUptime - promptStart
+            diagnostics.promptDuration += ProcessInfo.processInfo.systemUptime - contextStart
             diagnostics.promptTokenCount = max(diagnostics.promptTokenCount, tokens.count)
             options.promptTokens = tokens.isEmpty ? nil : tokens
             var input = Array(samples[range])
@@ -220,7 +220,7 @@ final class TranscriptionService: Transcribing {
             let prompt = VocabularyPrompt.text(for: words, maxTokens: budget) {
                 tokenizer.encode(text: " " + $0).count
             }
-            tokens = prompt.isEmpty ? [] : tokenizer.encode(text: " " + prompt).filter { $0 < tokenizer.specialTokens.specialTokenBegin }
+            tokens = prompt.isEmpty ? [] : Self.textTokens(" " + prompt, tokenizer)
         }
         promptCache = (key, tokens)
         return tokens
@@ -229,8 +229,11 @@ final class TranscriptionService: Transcribing {
     private func contextTokens(for context: String, tokenizer: WhisperTokenizer?) -> [Int] {
         let text = context.precomposedStringWithCanonicalMapping.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, let tokenizer else { return [] }
-        let tokens = tokenizer.encode(text: " " + text).filter { $0 < tokenizer.specialTokens.specialTokenBegin }
-        return Array(tokens.suffix(Self.contextTokenLimit))
+        return Array(Self.textTokens(" " + text, tokenizer).suffix(Self.contextTokenLimit))
+    }
+
+    private static func textTokens(_ text: String, _ tokenizer: WhisperTokenizer) -> [Int] {
+        tokenizer.encode(text: text).filter { $0 < tokenizer.specialTokens.specialTokenBegin }
     }
 
     /// Whisper captions sound events as "(music)", "[BLANK_AUDIO]", "*sigh*" or "♪".
@@ -241,7 +244,7 @@ final class TranscriptionService: Transcribing {
         var tokens = Set<Int>()
         for symbol in symbols {
             for text in [symbol, " " + symbol] {
-                let encoded = tokenizer.encode(text: text).filter { $0 < tokenizer.specialTokens.specialTokenBegin }
+                let encoded = textTokens(text, tokenizer)
                 if encoded.count == 1 { tokens.insert(encoded[0]) }
             }
         }
