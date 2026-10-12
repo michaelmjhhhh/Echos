@@ -28,6 +28,14 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install XcodeGen
         run: brew install xcodegen
+      # Content-addressed, so stale entries are harmless. Keyed on dependencies
+      # and Xcode only: they dominate compile time, and version bumps in
+      # project.yml must not force a cold cache.
+      - name: Cache Xcode compilation results
+        uses: actions/cache@v4
+        with:
+          path: build/CompilationCache
+          key: xcode-cas-${{ runner.os }}-${{ env.DEVELOPER_DIR }}-${{ hashFiles('config/Package.resolved') }}
       - name: Cache ASR smoke model
         uses: actions/cache@v4
         with:

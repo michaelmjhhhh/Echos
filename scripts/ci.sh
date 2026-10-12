@@ -4,6 +4,8 @@ ECHO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ECHO_ROOT"
 ECHO_BUILD_DIR="${ECHO_BUILD_DIR:-$ECHO_ROOT/build/ci}"
 ECHO_PACKAGES_DIR="${ECHO_PACKAGES_DIR:-$ECHO_ROOT/build/SourcePackages}"
+# Content-addressed Xcode compilation cache; CI restores it between runs.
+ECHO_COMPILATION_CACHE="${ECHO_COMPILATION_CACHE:-$ECHO_ROOT/build/CompilationCache}"
 xcodebuild -version
 xcodegen --version
 xcodegen generate
@@ -13,7 +15,8 @@ python3 scripts/verify-package-lock.py
 ECHO_BUILD_ARGUMENTS=(-project Echo.xcodeproj -destination 'platform=macOS,arch=arm64' \
   -derivedDataPath "$ECHO_BUILD_DIR" -clonedSourcePackagesDirPath "$ECHO_PACKAGES_DIR" \
   -disableAutomaticPackageResolution -onlyUsePackageVersionsFromResolvedFile ARCHS=arm64 \
-  CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO)
+  CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO \
+  COMPILATION_CACHE_ENABLE_CACHING=YES COMPILATION_CACHE_CAS_PATH="$ECHO_COMPILATION_CACHE")
 # Existing suite remains a required gate. Obsolete assertions must be reviewed;
 # this script never skips a check or turns failures into a successful release.
 xcodebuild "${ECHO_BUILD_ARGUMENTS[@]}" -scheme Echo -configuration Debug test
