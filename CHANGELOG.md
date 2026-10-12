@@ -4,6 +4,8 @@ All user-facing and engineering changes are recorded here. Model weights are unc
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-12
+
 ### Added
 
 - Add Parakeet v2 (English) as a speech model through FluidAudio 0.17.7. It downloads about 465 MB to `~/Library/Application Support/FluidAudio/Models/` and requires Apple Silicon. All Whisper models remain available. `EchoEvaluate` accepts `parakeet-tdt-0.6b-v2` as a model.
