@@ -90,6 +90,9 @@ actor ModelAcquisition {
     }
 
     private static func install(variant: String, folder: URL, downloadBase: URL?, forceRepair: Bool, progress: @escaping (Double) -> Void) async throws -> URL {
+        if WhisperModelCatalog.isParakeet(variant) {
+            return try await ParakeetModelPaths.install(folder: folder, forceRepair: forceRepair, progress: progress)
+        }
         guard let tokenizerRepo = WhisperModelCatalog.tokenizerRepository(for: variant) else {
             throw ModelInstallationError.unknownVariant
         }

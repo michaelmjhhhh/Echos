@@ -52,7 +52,9 @@ struct EchoEvaluate {
         var failures = 0
         var replayIndex = 0
         let started = ProcessInfo.processInfo.systemUptime
-        let service = TranscriptionService(modelVariant: options.model, downloadBase: options.downloadBase)
+        let service: any InstalledTranscribing = WhisperModelCatalog.isParakeet(options.model)
+            ? ParakeetTranscriptionService(downloadBase: options.downloadBase)
+            : TranscriptionService(modelVariant: options.model, downloadBase: options.downloadBase)
         var modelFingerprint: String?
         var tokenizerFingerprint: String?
         var preparationSeconds = 0.0
@@ -408,3 +410,11 @@ private struct Options {
     timing excludes audio-file loading, model warm-up, scoring, hashing and paste delivery.
     """
 }
+
+/// Both engines can load already-installed files without downloading.
+protocol InstalledTranscribing: Transcribing {
+    func prepareInstalled() async throws
+}
+
+extension TranscriptionService: InstalledTranscribing {}
+extension ParakeetTranscriptionService: InstalledTranscribing {}

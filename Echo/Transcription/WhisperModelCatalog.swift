@@ -2,7 +2,8 @@ import Foundation
 
 /// One entry in Echo's curated speech-model catalog.
 struct WhisperModel: Identifiable, Equatable {
-    /// Exact folder name in the argmaxinc/whisperkit-coreml repo.
+    /// Exact folder name in the argmaxinc/whisperkit-coreml repo, or
+    /// `ParakeetModelPaths.variant` for the FluidAudio Parakeet model.
     let variant: String
     let displayName: String
     let sizeLabel: String
@@ -49,6 +50,12 @@ enum WhisperModelCatalog {
             sizeLabel: "947 MB",
             detail: "Most accurate, slowest"
         ),
+        WhisperModel(
+            variant: ParakeetModelPaths.variant,
+            displayName: "Parakeet v2 (English)",
+            sizeLabel: "~465 MB",
+            detail: "Fast and accurate; ignores dictionary hints"
+        ),
     ]
 
     static func model(for variant: String) -> WhisperModel? {
@@ -79,6 +86,11 @@ enum WhisperModelCatalog {
         }
     }
 
+    /// Parakeet runs through FluidAudio instead of WhisperKit.
+    static func isParakeet(_ variant: String) -> Bool {
+        variant == ParakeetModelPaths.variant
+    }
+
     /// Falls back to the raw variant string for unknown/legacy values.
     static func displayName(for variant: String) -> String {
         model(for: variant)?.displayName ?? variant
@@ -103,7 +115,8 @@ enum WhisperModelPaths {
     }
 
     static func modelFolder(for variant: String, downloadBase: URL?) -> URL {
-        (downloadBase ?? defaultDownloadBase())
+        if WhisperModelCatalog.isParakeet(variant) { return ParakeetModelPaths.folder(downloadBase: downloadBase) }
+        return (downloadBase ?? defaultDownloadBase())
             .appendingPathComponent("models")
             .appendingPathComponent(repoID)
             .appendingPathComponent(variant)
@@ -111,6 +124,7 @@ enum WhisperModelPaths {
 
     static func isDownloaded(_ variant: String, downloadBase: URL?) -> Bool {
         let folder = modelFolder(for: variant, downloadBase: downloadBase)
+        if WhisperModelCatalog.isParakeet(variant) { return ParakeetModelPaths.isInstalled(at: folder) }
         return (try? validateModel(at: folder)) != nil && localTokenizerFolder(for: variant, downloadBase: downloadBase) != nil
     }
 

@@ -39,8 +39,17 @@ final class ModelStore: ObservableObject {
         self.settings = settings ?? .shared
         self.downloader = downloader ?? WhisperKitModelDownloader(downloadBase: downloadBase)
         self.downloadBase = downloadBase
-        self.supportedVariants = supportedVariants ?? Set(WhisperKit.recommendedModels().supported)
+        self.supportedVariants = supportedVariants ?? Self.deviceSupportedVariants()
         refresh()
+    }
+
+    /// FluidAudio's Parakeet models require Apple Silicon.
+    private static func deviceSupportedVariants() -> Set<String> {
+        var variants = Set(WhisperKit.recommendedModels().supported)
+        #if arch(arm64)
+        variants.insert(ParakeetModelPaths.variant)
+        #endif
+        return variants
     }
 
     var isDownloadingAnything: Bool { !downloadProgress.isEmpty }

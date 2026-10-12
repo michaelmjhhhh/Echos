@@ -4,6 +4,10 @@ All user-facing and engineering changes are recorded here. Model weights are unc
 
 ## [Unreleased]
 
+### Added
+
+- Add Parakeet v2 (English) as an optional speech model next to the Whisper models, through FluidAudio 0.17.7. It downloads about 465 MB to `~/Library/Application Support/FluidAudio/Models/` and requires Apple Silicon. Whisper pads every recording to a 30-second window, so Distil Large v3's encoder took about 0.6–0.75 s even for a one-second clip on the developer's M4; Parakeet is expected to remove most of that fixed wait, but its latency and accuracy have not yet been measured in Echo. Parakeet takes no text prompt, so dictionary hints, recent context and "Retry difficult speech" do not apply to it; saved spelling corrections and snippets still do. English only. `EchoEvaluate` accepts `parakeet-tdt-0.6b-v2` as a model.
+
 ## [0.5.1] - 2026-10-10
 
 ### Changed

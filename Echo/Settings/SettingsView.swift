@@ -202,7 +202,7 @@ struct SettingsView: View {
                 .labelsHidden()
                 .frame(width: EchoLayout.settingsControlWidth, alignment: .trailing)
             }
-            footnote("Tokens are small pieces of text. 50 tokens holds about 15 terms; longer hints caused empty transcripts in testing. Star the terms you need most. Saved spelling corrections still apply with hints off.")
+            footnote("Tokens are small pieces of text. 50 tokens holds about 15 terms; longer hints caused empty transcripts in testing. Star the terms you need most. Saved spelling corrections still apply with hints off. Parakeet ignores hints.")
             hairline
             labeledRow("Retry difficult speech") {
                 Picker("Retry difficult speech", selection: $settings.decodingFallbackCount) {
@@ -214,7 +214,7 @@ struct SettingsView: View {
                 .labelsHidden()
                 .frame(width: EchoLayout.settingsControlWidth, alignment: .trailing)
             }
-            footnote("Fewer retries can reduce waiting on unclear audio and may reduce recognition quality.")
+            footnote("Fewer retries can reduce waiting on unclear audio and may reduce recognition quality. Whisper models only.")
             hairline
             labeledRow("Use recent dictation as context") {
                 Toggle("Use recent dictation as context", isOn: $settings.useRecentContext).labelsHidden().toggleStyle(.switch).controlSize(.small)

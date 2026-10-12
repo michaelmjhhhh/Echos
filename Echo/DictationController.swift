@@ -111,7 +111,9 @@ final class DictationController: ObservableObject {
         self.snippets = snippets
         self.settings = settings
         self.recorder = recorder
-        let factory = transcriberFactory ?? { TranscriptionService(modelVariant: $0) }
+        let factory = transcriberFactory ?? { variant -> Transcribing in
+            WhisperModelCatalog.isParakeet(variant) ? ParakeetTranscriptionService() : TranscriptionService(modelVariant: variant)
+        }
         self.makeTranscriber = factory
         self.transcriber = transcriber ?? factory(settings.modelVariant)
         self.transcriberVariant = settings.modelVariant
