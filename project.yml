@@ -29,8 +29,8 @@ targets:
       path: Echo/Info.plist
       properties:
         CFBundleDisplayName: Echo
-        CFBundleShortVersionString: "0.5.1"
-        CFBundleVersion: "6"
+        CFBundleShortVersionString: "0.6.0"
+        CFBundleVersion: "7"
         CFBundleIconFile: AppIcon
         ATSApplicationFontsPath: "."
         NSMicrophoneUsageDescription: Echo listens while you hold the dictation key so it can transcribe your speech on-device.
