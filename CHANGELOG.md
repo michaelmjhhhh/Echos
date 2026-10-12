@@ -6,7 +6,7 @@ All user-facing and engineering changes are recorded here. Model weights are unc
 
 ### Changed
 
-- Speed up CI. `scripts/ci.sh` builds `EchoEvaluate` in Debug so it reuses the test build's dependencies instead of compiling them again in Release, and enables Xcode compilation caching. Validate caches Swift package checkouts, the compilation cache and the whisper-tiny smoke model, skips Markdown/docs-only changes, and cancels older runs of the same PR. The release build now runs alongside Validate, and publishing waits for both; release binaries still compile without the compilation cache. CI replay timings come from a Debug evaluator and are not latency measurements.
+- Speed up CI. `scripts/ci.sh` builds `EchoEvaluate` in Debug so it reuses the test build's dependencies instead of compiling them again in Release (about 2 min to 13–18 s on GitHub runners). Validate caches the whisper-tiny smoke model (replay 38 s to 5 s), skips Markdown/docs-only changes, and cancels older runs of the same PR. With these changes a Validate run took about 3 minutes, down from 5–8. The release build now runs alongside Validate, and publishing waits for both. CI replay timings come from a Debug evaluator and are not latency measurements. Caching Swift package checkouts and Xcode compilation results was tried and dropped: restoring them took as long as it saved.
 
 - Rewrite the README with the app icon, badges, a feature table, a model comparison and a flow diagram. Install steps now use the same quarantine command as the release notes. Build-from-source steps now include ad-hoc signing flags and the real output path.
 

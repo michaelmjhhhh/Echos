@@ -85,14 +85,6 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
-      # Checkouts are pinned and checked by verify-package-lock.py below.
-      # Compilation results are not cached here; release binaries build clean.
-      - name: Cache Swift package checkouts
-        uses: actions/cache@v4
-        with:
-          path: build/SourcePackages
-          key: spm-${{ runner.os }}-${{ hashFiles('config/Package.resolved') }}
-
       - name: Resolve reviewed dependency revisions
         run: |
           xcodebuild -project Echo.xcodeproj -scheme Echo -resolvePackageDependencies \

@@ -28,18 +28,6 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install XcodeGen
         run: brew install xcodegen
-      - name: Cache Swift package checkouts
-        uses: actions/cache@v4
-        with:
-          path: build/SourcePackages
-          key: spm-${{ runner.os }}-${{ hashFiles('config/Package.resolved') }}
-      # Saved once per dependency set and Xcode version; app sources recompile
-      # quickly, so the cache does not need refreshing on every commit.
-      - name: Cache Xcode compilation results
-        uses: actions/cache@v4
-        with:
-          path: build/CompilationCache
-          key: xcode-cas-${{ runner.os }}-${{ env.DEVELOPER_DIR }}-${{ hashFiles('config/Package.resolved', 'project.yml') }}
       - name: Cache ASR smoke model
         uses: actions/cache@v4
         with:
