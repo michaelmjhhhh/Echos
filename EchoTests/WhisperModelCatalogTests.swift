@@ -34,7 +34,7 @@ final class WhisperModelCatalogTests: XCTestCase {
         XCTAssertEqual(WhisperModelCatalog.model(for: "openai_whisper-base.en")?.displayName, "Base (English)")
         XCTAssertEqual(
             WhisperModelCatalog.model(for: SettingsStore.defaultModelVariant)?.displayName,
-            "Distil Large v3"
+            "Parakeet v2 (English)"
         )
     }
 

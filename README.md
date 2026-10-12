@@ -2,7 +2,7 @@
 
 Free, fully-local "dictate anywhere" for macOS — a subscription-free alternative to Wispr Flow.
 
-Hold **Right ⌥**, speak, release: your words are typed into whatever app has focus. Transcription runs entirely on-device with [WhisperKit](https://github.com/argmaxinc/argmax-oss-swift) (CoreML, Apple Neural Engine). No network calls, no accounts.
+Hold **Right ⌥**, speak, release: your words are typed into whatever app has focus. Transcription runs entirely on-device with Parakeet v2 through [FluidAudio](https://github.com/FluidInference/FluidAudio) by default, or Whisper models through [WhisperKit](https://github.com/argmaxinc/argmax-oss-swift) (CoreML, Apple Neural Engine). No network calls, no accounts.
 
 ## Install (prebuilt)
 
@@ -30,20 +30,20 @@ open build/Release/Echo.app   # or run from Xcode
 First launch:
 
 1. Grant **Microphone** and **Accessibility** permissions (Echo prompts and the menu bar icon links to the right Settings panes).
-2. Wait for the one-time model download (~600 MB, shown in the menu).
+2. Wait for the one-time model download (~465 MB, shown in the menu).
 3. Hold Right ⌥ and talk.
 
 ## How it works
 
 ```
-Right ⌥ held ──► AVAudioEngine (16 kHz mono) ──► WhisperKit (distil-large-v3, on-device)
+Right ⌥ held ──► AVAudioEngine (16 kHz mono) ──► FluidAudio (Parakeet v2, on-device)
                                                        │
 cursor ◄── ⌘V paste (transcript left on clipboard) ◄── TextProcessor chain
 ```
 
 - **Hotkey:** configurable in Settings (Right ⌥ / Right ⌘ / Fn).
 - **Insertion:** clipboard paste — the only method that works reliably across native, Electron, and browser apps. By default the transcript stays on the clipboard so you can paste it again; turn **Copy transcript to clipboard** off in Settings to restore the previous clipboard after paste. If a password field has focus and that setting is off, Echo offers a Copy pill instead.
-- **TextProcessor pipeline:** raw Whisper text flows through cleanup stages before insertion; this is the hook for a future local-LLM formatting pass.
+- **TextProcessor pipeline:** raw transcript text flows through cleanup stages before insertion; this is the hook for a future local-LLM formatting pass.
 - **Snippets:** save text you type often (an email, link, or prompt) with a trigger phrase; say the trigger — alone or mid-sentence — and Echo inserts the saved text instead. Matching is case-insensitive; expansions are inserted verbatim.
 
 ## Tests

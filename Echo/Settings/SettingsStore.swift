@@ -30,8 +30,8 @@ enum AppAppearance: String, CaseIterable, Identifiable {
 final class SettingsStore: ObservableObject {
     static let shared = SettingsStore()
 
-    /// English-optimized Whisper variant from argmaxinc/whisperkit-coreml (~600 MB).
-    nonisolated static let defaultModelVariant = "distil-whisper_distil-large-v3_594MB"
+    /// Parakeet TDT 0.6B v2 through FluidAudio (~465 MB, English only).
+    nonisolated static let defaultModelVariant = ParakeetModelPaths.variant
 
     @Published var hotkey: Hotkey {
         didSet { defaults.set(hotkey.rawValue, forKey: Keys.hotkey) }

@@ -11,6 +11,9 @@ packages:
   ArgmaxOSS:
     url: https://github.com/argmaxinc/argmax-oss-swift.git
     exactVersion: 0.18.0
+  FluidAudio:
+    url: https://github.com/FluidInference/FluidAudio.git
+    exactVersion: 0.17.7
 
 targets:
   Echo:
@@ -21,6 +24,7 @@ targets:
     dependencies:
       - package: ArgmaxOSS
         product: WhisperKit
+      - package: FluidAudio
     info:
       path: Echo/Info.plist
       properties:
@@ -54,6 +58,8 @@ targets:
       - Echo/Transcription/WhisperModelCatalog.swift
       - Echo/Transcription/ModelAcquisition.swift
       - Echo/Transcription/LocalWhisperTokenizer.swift
+      - Echo/Transcription/ParakeetModelPaths.swift
+      - Echo/Transcription/ParakeetTranscriptionService.swift
       - Echo/Audio/CaptureConfiguration.swift
       - Echo/Audio/CapturedAudio.swift
       - Echo/Audio/VoiceActivityTrimmer.swift
@@ -61,6 +67,7 @@ targets:
     dependencies:
       - package: ArgmaxOSS
         product: WhisperKit
+      - package: FluidAudio
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.michael.echo.evaluate

@@ -52,7 +52,9 @@ struct EchoEvaluate {
         var failures = 0
         var replayIndex = 0
         let started = ProcessInfo.processInfo.systemUptime
-        let service = TranscriptionService(modelVariant: options.model, downloadBase: options.downloadBase)
+        let service: any InstalledTranscribing = WhisperModelCatalog.isParakeet(options.model)
+            ? ParakeetTranscriptionService(downloadBase: options.downloadBase)
+            : TranscriptionService(modelVariant: options.model, downloadBase: options.downloadBase)
         var modelFingerprint: String?
         var tokenizerFingerprint: String?
         var preparationSeconds = 0.0
@@ -318,7 +320,7 @@ private struct Options {
     var help = false
     var manifest: URL?
     var output: URL?
-    var model = "distil-whisper_distil-large-v3_594MB"
+    var model = ParakeetModelPaths.variant
     var downloadBase: URL?
     var download = false
     var validateOnly = false
@@ -381,7 +383,7 @@ private struct Options {
     EchoEvaluate — local fixed-model replay, using Echo's production pipeline.
 
     Usage: EchoEvaluate --manifest corpus.json [options]
-      --model VARIANT          Existing catalog variant (default: Echo's Distil Large v3)
+      --model VARIANT          Existing catalog variant (default: Echo's Parakeet v2)
       --download-base PATH     Hugging Face cache root (default: Echo's cache location)
       --download               Explicitly allow model/tokenizer download or repair
       --repeat N               Repeat every clip 1–100 times (default: 1)
@@ -408,3 +410,11 @@ private struct Options {
     timing excludes audio-file loading, model warm-up, scoring, hashing and paste delivery.
     """
 }
+
+/// Both engines can load already-installed files without downloading.
+protocol InstalledTranscribing: Transcribing {
+    func prepareInstalled() async throws
+}
+
+extension TranscriptionService: InstalledTranscribing {}
+extension ParakeetTranscriptionService: InstalledTranscribing {}

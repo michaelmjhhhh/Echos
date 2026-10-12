@@ -252,7 +252,7 @@ final class TranscriptionService: Transcribing {
     }
 }
 
-private actor TranscriptionGate {
+actor TranscriptionGate {
     private var occupied = false
     private var waiters: [CheckedContinuation<Void, Never>] = []
 
