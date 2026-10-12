@@ -10,6 +10,10 @@ All user-facing and engineering changes are recorded here. Model weights are unc
 
 - Rewrite the README with the app icon, badges, a feature table, a model comparison and a flow diagram. Install steps now use the same quarantine command as the release notes. Build-from-source steps now include ad-hoc signing flags and the real output path.
 
+### Fixed
+
+- `WaveformLevelCoalescerTests.testBurstDeliversOnlyLatestLevel` failed in 14 of 300 local runs because it asserted after a single `Task.yield()`, before the main-actor delivery had run. The coalescer tests now wait up to 1 s for a delivery, or 100 ms when expecting none; the fixed tests passed 1,200 of 1,200 runs. The two `testMaximumRuleSetPerformanceBaseline` tests had no committed performance baseline, so `measure()` never gated speed and only repeated one assertion 10 times; they now run the 1,000-rule correctness check once as `testMaximumRuleSetStillMatches`.
+
 ## [0.6.0] - 2026-10-12
 
 ### Added

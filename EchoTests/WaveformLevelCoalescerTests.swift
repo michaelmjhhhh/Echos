@@ -17,7 +17,7 @@ final class WaveformLevelCoalescerTests: XCTestCase {
         sut.submit(0.9)
         await sleeper.waitUntilSleeping()
         await sleeper.advance()
-        await Task.yield()
+        await waitForDelivery { !delivered.isEmpty }
 
         XCTAssertEqual(delivered, [0.9])
     }
@@ -35,7 +35,7 @@ final class WaveformLevelCoalescerTests: XCTestCase {
         await sleeper.waitUntilSleeping()
         sut.stop()
         await sleeper.advance()
-        await Task.yield()
+        await waitForDelivery(timeout: .milliseconds(100)) { !delivered.isEmpty }
 
         XCTAssertTrue(delivered.isEmpty)
     }
@@ -54,7 +54,7 @@ final class WaveformLevelCoalescerTests: XCTestCase {
         sut.stop()
         sut.start()
         await sleeper.advance()
-        await Task.yield()
+        await waitForDelivery(timeout: .milliseconds(100)) { !delivered.isEmpty }
 
         XCTAssertTrue(delivered.isEmpty)
     }
@@ -77,9 +77,20 @@ final class WaveformLevelCoalescerTests: XCTestCase {
 
         sut.stop()
         await deliveryGate.advance()
-        await Task.yield()
+        await waitForDelivery(timeout: .milliseconds(100)) { !delivered.isEmpty }
 
         XCTAssertTrue(delivered.isEmpty)
+    }
+}
+
+/// Delivery hops from the sleeping task to the main actor, so one `Task.yield()`
+/// does not guarantee it has run. Returns once `delivered()` is true or the
+/// timeout passes; tests expecting no delivery wait out the full window.
+@MainActor
+private func waitForDelivery(timeout: Duration = .seconds(1), until delivered: () -> Bool) async {
+    let deadline = ContinuousClock.now + timeout
+    while !delivered(), ContinuousClock.now < deadline {
+        try? await Task.sleep(for: .milliseconds(1))
     }
 }
 
