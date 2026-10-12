@@ -11,6 +11,10 @@ final class ParakeetTranscriptionService: Transcribing {
     private(set) var modelFolder: URL?
     private var manager: AsrManager?
     private let gate = TranscriptionGate()
+    /// Below FluidAudio's 15-second single-pass limit, with margin.
+    static let maximumChunkSamples = 14 * SpeechChunker.sampleRate
+    /// Parakeet has no prompt to carry, so short final chunks are acceptable.
+    static let minimumChunkSamples = 4 * SpeechChunker.sampleRate
 
     init(downloadBase: URL? = nil) {
         self.downloadBase = downloadBase
@@ -80,12 +84,22 @@ final class ParakeetTranscriptionService: Transcribing {
         }
         if let language = request.language, language != "en" { throw TranscriptionError.unsupportedLanguage }
         let start = ProcessInfo.processInfo.systemUptime
-        let result = try await Self.decode(Self.padded(samples), with: manager)
-        try Task.checkCancellation()
+        var texts: [String] = []
+        // FluidAudio splits audio over 15 s into overlapping windows and drops
+        // tokens it sees twice in the overlap. In replay that lost a repeated
+        // "yes" from a 60-second clip. Cutting at pauses into single-window
+        // chunks keeps every chunk on the one-pass path.
+        for range in SpeechChunker.chunks(samples, maximumSamples: Self.maximumChunkSamples,
+                                          minimumSamples: Self.minimumChunkSamples) {
+            let result = try await Self.decode(Self.padded(Array(samples[range])), with: manager)
+            try Task.checkCancellation()
+            diagnostics.encoderRuns += 1
+            diagnostics.decoderTokenCount += result.tokenTimings?.count ?? 0
+            let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !text.isEmpty { texts.append(text) }
+        }
         diagnostics.inferenceDuration = ProcessInfo.processInfo.systemUptime - start
-        diagnostics.encoderRuns = 1
-        diagnostics.decoderTokenCount = result.tokenTimings?.count ?? 0
-        return TranscriptionOutput(text: result.text, language: "en", diagnostics: diagnostics)
+        return TranscriptionOutput(text: texts.joined(separator: " "), language: "en", diagnostics: diagnostics)
     }
 
     private static func decode(_ samples: [Float], with manager: AsrManager) async throws -> ASRResult {

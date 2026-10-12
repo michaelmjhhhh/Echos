@@ -22,16 +22,18 @@ enum SpeechChunker {
     /// would leave a final chunk under 10 s, the last two chunks are split
     /// about evenly instead (each 10 s or longer) rather than 28 s plus a
     /// 1-second tail for a 29-second recording.
-    static func chunks(_ samples: [Float]) -> [Range<Int>] {
-        guard samples.count > maximumChunkSamples else { return [samples.indices] }
+    /// Parakeet passes its own limits: a 15-second window and no prompt.
+    static func chunks(_ samples: [Float], maximumSamples: Int = maximumChunkSamples,
+                       minimumSamples: Int = minimumChunkSamples) -> [Range<Int>] {
+        guard samples.count > maximumSamples else { return [samples.indices] }
         var ranges: [Range<Int>] = []
         var start = 0
-        while samples.count - start > maximumChunkSamples {
+        while samples.count - start > maximumSamples {
             let remaining = samples.count - start
-            let length = remaining < maximumChunkSamples + minimumChunkSamples
+            let length = remaining < maximumSamples + minimumSamples
                 ? remaining / 2 + searchSamples / 2
-                : maximumChunkSamples
-            let end = start + min(maximumChunkSamples, length)
+                : maximumSamples
+            let end = start + min(maximumSamples, length)
             let cut = quietestPoint(in: samples, range: (end - searchSamples)..<end)
             ranges.append(start..<cut)
             start = cut
