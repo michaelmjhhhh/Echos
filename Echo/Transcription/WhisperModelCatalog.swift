@@ -15,6 +15,12 @@ struct WhisperModel: Identifiable, Equatable {
 enum WhisperModelCatalog {
     static let models: [WhisperModel] = [
         WhisperModel(
+            variant: ParakeetModelPaths.variant,
+            displayName: "Parakeet v2 (English)",
+            sizeLabel: "~465 MB",
+            detail: "Echo's default — fastest; ignores dictionary hints"
+        ),
+        WhisperModel(
             variant: "openai_whisper-tiny.en",
             displayName: "Tiny (English)",
             sizeLabel: "~75 MB",
@@ -36,7 +42,7 @@ enum WhisperModelCatalog {
             variant: "distil-whisper_distil-large-v3_594MB",
             displayName: "Distil Large v3",
             sizeLabel: "594 MB",
-            detail: "Echo's default — accurate and quick"
+            detail: "Accurate Whisper model; uses dictionary hints"
         ),
         WhisperModel(
             variant: "openai_whisper-large-v3-v20240930_626MB",
@@ -49,12 +55,6 @@ enum WhisperModelCatalog {
             displayName: "Large v3",
             sizeLabel: "947 MB",
             detail: "Most accurate, slowest"
-        ),
-        WhisperModel(
-            variant: ParakeetModelPaths.variant,
-            displayName: "Parakeet v2 (English)",
-            sizeLabel: "~465 MB",
-            detail: "Fast and accurate; ignores dictionary hints"
         ),
     ]
 
