@@ -4,6 +4,10 @@ All user-facing and engineering changes are recorded here. Model weights are unc
 
 ## [Unreleased]
 
+### Changed
+
+- Rewrite the README with the app icon, badges, a feature table, a model comparison and a flow diagram. Install steps now use the same quarantine command as the release notes. Build-from-source steps now include ad-hoc signing flags and the real output path.
+
 ## [0.6.0] - 2026-10-12
 
 ### Added
