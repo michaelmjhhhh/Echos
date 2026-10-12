@@ -3,12 +3,19 @@ name: Validate
 on:
   push:
     branches: [main]
+    paths-ignore: ["**/*.md", "docs/**", "LICENSE"]
   pull_request:
+    paths-ignore: ["**/*.md", "docs/**", "LICENSE"]
   workflow_dispatch:
   workflow_call:
 
 permissions:
   contents: read
+
+# A new push to a PR cancels its older run; main and release runs always finish.
+concurrency:
+  group: validate-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   validate:
@@ -21,6 +28,23 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install XcodeGen
         run: brew install xcodegen
+      - name: Cache Swift package checkouts
+        uses: actions/cache@v4
+        with:
+          path: build/SourcePackages
+          key: spm-${{ runner.os }}-${{ hashFiles('config/Package.resolved') }}
+      # Saved once per dependency set and Xcode version; app sources recompile
+      # quickly, so the cache does not need refreshing on every commit.
+      - name: Cache Xcode compilation results
+        uses: actions/cache@v4
+        with:
+          path: build/CompilationCache
+          key: xcode-cas-${{ runner.os }}-${{ env.DEVELOPER_DIR }}-${{ hashFiles('config/Package.resolved', 'project.yml') }}
+      - name: Cache ASR smoke model
+        uses: actions/cache@v4
+        with:
+          path: build/ci/model-cache
+          key: asr-smoke-model-openai_whisper-tiny.en-${{ hashFiles('config/Package.resolved') }}
       - name: Build, existing checks, and owned audio replay
         run: scripts/ci.sh
       - name: Upload content-free evaluation reports
