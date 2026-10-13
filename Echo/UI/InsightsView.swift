@@ -23,9 +23,6 @@ struct InsightsView: View {
                 .echoStagger(1, reduceMotion: reduceMotion)
                 resultsCard(snapshot)
                     .echoStagger(2, reduceMotion: reduceMotion)
-                Text("Words count recognized speech before snippet expansion. A paste request does not confirm that text appeared in another app. Older records may include expanded text.")
-                    .font(.echo(11)).foregroundStyle(Color.echoSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
                 if let error = usage.persistenceError {
                     Text(error).font(.echo(11)).foregroundStyle(Color.echoWarning)
                 }

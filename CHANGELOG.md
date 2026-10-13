@@ -4,6 +4,10 @@ All user-facing and engineering changes are recorded here. Model weights are unc
 
 ## [Unreleased]
 
+### Removed
+
+- Remove the explanatory footnote below the result counts on the Insights page.
+
 ### Changed
 
 - Speed up CI. `scripts/ci.sh` builds `EchoEvaluate` in Debug so it reuses the test build's dependencies instead of compiling them again in Release (about 2 min to 13–18 s on GitHub runners). Validate caches the whisper-tiny smoke model (replay 38 s to 5 s) and Xcode compilation results (build and test 56–70 s with a warm cache, against 75–179 s without), skips Markdown/docs-only changes, and cancels older runs of the same PR. With a warm cache, Validate took 2m36s–2m47s, down from 5–8 minutes; the first run after `config/Package.resolved` or Xcode changes is slower, about 4 minutes. The release build now runs alongside Validate, and publishing waits for both; release binaries build without the compilation cache. CI replay timings come from a Debug evaluator and are not latency measurements. A Swift package checkout cache was tried and dropped: restoring it took as long as the fetch it replaced.
