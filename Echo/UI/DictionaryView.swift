@@ -61,7 +61,11 @@ struct DictionaryView: View {
     private var content: some View {
         VStack(alignment: .leading, spacing: 14) {
             header
-            statLine
+            if let importSummary {
+                EyebrowText(text: importSummary)
+                    .monospacedDigit()
+                    .transition(.opacity)
+            }
 
             if filtered.isEmpty {
                 noMatchesState
@@ -149,27 +153,6 @@ struct DictionaryView: View {
         .fixedSize()
         .help("Change how words are sorted")
         .accessibilityLabel("Sort words, currently \(dictionary.sort.label)")
-    }
-
-    /// The dashboard: one honest mono line — counts this small don't earn charts.
-    private var statLine: some View {
-        HStack(spacing: Spacing.xs) {
-            EyebrowText(text: [
-                echoCount(dictionary.entries.count, "word"),
-                echoCount(dictionary.starredCount, "starred", plural: "starred"),
-                echoCount(dictionary.replacementCount, "replacement"),
-            ].joined(separator: " · "))
-            .monospacedDigit()
-            .accessibilityLabel(
-                "\(echoCount(dictionary.entries.count, "word")), \(dictionary.starredCount) starred, \(echoCount(dictionary.replacementCount, "replacement"))"
-            )
-
-            if let importSummary {
-                EyebrowText(text: "— \(importSummary)")
-                    .monospacedDigit()
-                    .transition(.opacity)
-            }
-        }
     }
 
     // MARK: - Import

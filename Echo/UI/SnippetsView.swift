@@ -50,7 +50,6 @@ struct SnippetsView: View {
     private var content: some View {
         VStack(alignment: .leading, spacing: 14) {
             header
-            statLine
 
             if filtered.isEmpty {
                 noMatchesState
@@ -90,12 +89,6 @@ struct SnippetsView: View {
                 .buttonStyle(EchoPrimaryButtonStyle())
                 .help("Add a snippet (⌘N)")
         }
-    }
-
-    private var statLine: some View {
-        EyebrowText(text: echoCount(snippets.entries.count, "snippet"))
-            .monospacedDigit()
-            .accessibilityLabel(echoCount(snippets.entries.count, "snippet"))
     }
 
     // MARK: - Empty states

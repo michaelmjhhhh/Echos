@@ -6,6 +6,7 @@ All user-facing and engineering changes are recorded here. Model weights are unc
 
 ### Removed
 
+- Remove the record-count summary lines from History, Dictionary, and Snippets.
 - Remove the explanatory footnote below the result counts on the Insights page.
 
 ### Changed
