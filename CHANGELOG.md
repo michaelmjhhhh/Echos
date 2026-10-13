@@ -6,7 +6,13 @@ All user-facing and engineering changes are recorded here. Model weights are unc
 
 ### Changed
 
+- Speed up CI. `scripts/ci.sh` builds `EchoEvaluate` in Debug so it reuses the test build's dependencies instead of compiling them again in Release (about 2 min to 13–18 s on GitHub runners). Validate caches the whisper-tiny smoke model (replay 38 s to 5 s) and Xcode compilation results (build and test 56–70 s with a warm cache, against 75–179 s without), skips Markdown/docs-only changes, and cancels older runs of the same PR. With a warm cache, Validate took 2m36s–2m47s, down from 5–8 minutes; the first run after `config/Package.resolved` or Xcode changes is slower, about 4 minutes. The release build now runs alongside Validate, and publishing waits for both; release binaries build without the compilation cache. CI replay timings come from a Debug evaluator and are not latency measurements. A Swift package checkout cache was tried and dropped: restoring it took as long as the fetch it replaced.
+
 - Rewrite the README with the app icon, badges, a feature table, a model comparison and a flow diagram. Install steps now use the same quarantine command as the release notes. Build-from-source steps now include ad-hoc signing flags and the real output path.
+
+### Fixed
+
+- `WaveformLevelCoalescerTests.testBurstDeliversOnlyLatestLevel` failed in 14 of 300 local runs because it asserted after a single `Task.yield()`, before the main-actor delivery had run. The coalescer tests now wait up to 1 s for a delivery, or 100 ms when expecting none; the fixed tests passed 1,200 of 1,200 runs. The two `testMaximumRuleSetPerformanceBaseline` tests had no committed performance baseline, so `measure()` never gated speed and only repeated one assertion 10 times; they now run the 1,000-rule correctness check once as `testMaximumRuleSetStillMatches`.
 
 ## [0.6.0] - 2026-10-12
 

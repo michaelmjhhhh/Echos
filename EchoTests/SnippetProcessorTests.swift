@@ -107,14 +107,12 @@ final class SnippetProcessorTests: XCTestCase {
         XCTAssertEqual(text, "send it to jhmamichael@gmail.com please")
     }
 
-    func testMaximumRuleSetPerformanceBaseline() {
+    func testMaximumRuleSetStillMatches() {
         let rules = (0..<SnippetStore.defaultMaxEntries).map {
             ("trigger \($0)", "expansion \($0)")
         }
         let sut = processor(rules)
 
-        measure(metrics: [XCTClockMetric()]) {
-            XCTAssertEqual(sut.process("use trigger 999 now"), "use expansion 999 now")
-        }
+        XCTAssertEqual(sut.process("use trigger 999 now"), "use expansion 999 now")
     }
 }

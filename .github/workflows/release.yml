@@ -24,17 +24,17 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
+# The build runs alongside validation; publish waits for both.
 jobs:
   validate:
     uses: ./.github/workflows/ci.yml
-    permissions:
-      contents: read
 
-  release:
-    needs: validate
+  build:
     runs-on: macos-26
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.5.app/Contents/Developer
       SIGNING_ENABLED: ${{ secrets.DEVELOPER_ID_P12 != '' && secrets.DEVELOPER_ID_P12_PASSWORD != '' && secrets.NOTARY_KEY_P8 != '' && secrets.NOTARY_KEY_ID != '' && secrets.NOTARY_ISSUER_ID != '' }}
@@ -45,6 +45,7 @@ jobs:
           fetch-depth: 0
 
       - name: Validate release version and changelog
+        id: version
         run: |
           python3 - <<'PY'
           import datetime
@@ -74,6 +75,8 @@ jobs:
           previous = next((item for item in tags if re.fullmatch(r"v\d+\.\d+\.\d+", item) and tuple(map(int, item[1:].split("."))) < current), "")
           with open(os.environ["GITHUB_ENV"], "a") as output:
               output.write(f"RELEASE_VERSION={version}\nRELEASE_TAG={tag}\nPREVIOUS_TAG={previous}\n")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"tag={tag}\n")
           PY
 
       - name: Install XcodeGen
@@ -216,7 +219,7 @@ jobs:
           notes += "3. Launch Echo, grant **Microphone** and **Accessibility** permissions, and complete the one-time model download if needed. Existing installed models are reused.\n"
           notes += "4. Hold your configured dictation key (default: Right Option), speak, then release.\n"
           notes += "\n## Verification\n\n"
-          notes += f"- [Release workflow]({run_url}): build, existing automated checks, dependency-lock validation, and synthetic audio replay passed before packaging.\n"
+          notes += f"- [Release workflow]({run_url}): build, existing automated checks, dependency-lock validation, and synthetic audio replay passed before publishing.\n"
           notes += f"- Source: [`{commit[:12]}`]({server}/{repo}/commit/{commit}). `{manifest_name}` records the app version, build number, signing status, source commit, and dependency-lock hash.\n"
           notes += "- Download `SHA256SUMS` beside the DMG and run `shasum -a 256 -c SHA256SUMS` to verify the asset. Synthetic replay is not a measurement of natural-dictation accuracy.\n"
           previous = os.environ["PREVIOUS_TAG"]
@@ -235,10 +238,23 @@ jobs:
             Echo-*-build.json
             release-notes.md
 
+  publish:
+    needs: [validate, build]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ needs.build.outputs.tag }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Echo-dmg
+
       - name: Publish GitHub release
-        if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           gh release create "$RELEASE_TAG" \
             "Echo-${RELEASE_TAG}.dmg" SHA256SUMS "Echo-${RELEASE_TAG}-build.json" \
