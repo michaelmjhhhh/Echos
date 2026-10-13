@@ -4,8 +4,11 @@ All user-facing and engineering changes are recorded here. Model weights are unc
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-13
+
 ### Removed
 
+- Remove the record-count summary lines from History, Dictionary, and Snippets.
 - Remove the explanatory footnote below the result counts on the Insights page.
 
 ### Changed
@@ -17,6 +20,8 @@ All user-facing and engineering changes are recorded here. Model weights are unc
 ### Fixed
 
 - `WaveformLevelCoalescerTests.testBurstDeliversOnlyLatestLevel` failed in 14 of 300 local runs because it asserted after a single `Task.yield()`, before the main-actor delivery had run. The coalescer tests now wait up to 1 s for a delivery, or 100 ms when expecting none; the fixed tests passed 1,200 of 1,200 runs. The two `testMaximumRuleSetPerformanceBaseline` tests had no committed performance baseline, so `measure()` never gated speed and only repeated one assertion 10 times; they now run the 1,000-rule correctness check once as `testMaximumRuleSetStillMatches`.
+
+Validation limitation: the counter removal was build-checked; no new real-device dictation or visual regression testing was performed for this release.
 
 ## [0.6.0] - 2026-10-12
 
@@ -116,7 +121,9 @@ The interface changes are covered only by a successful build and the existing au
 
 - Publish the first GitHub release with a DMG for Apple Silicon Macs running macOS 14 or later.
 
-[Unreleased]: https://github.com/michaelmjhhhh/Echos/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/michaelmjhhhh/Echos/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/michaelmjhhhh/Echos/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/michaelmjhhhh/Echos/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/michaelmjhhhh/Echos/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/michaelmjhhhh/Echos/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/michaelmjhhhh/Echos/compare/v0.3.0...v0.4.0

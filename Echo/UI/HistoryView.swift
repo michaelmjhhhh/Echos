@@ -42,10 +42,6 @@ struct HistoryView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             header
-            if !transcripts.entries.isEmpty {
-                EyebrowText(text: echoCount(transcripts.entries.count, "transcript"))
-                    .monospacedDigit()
-            }
             PersistenceStatusView(error: transcripts.persistenceError, isSaving: transcripts.isSaving,
                 recoveryAvailable: transcripts.recoveryAvailable,
                 retry: { Task { _ = await transcripts.retrySave() } },
